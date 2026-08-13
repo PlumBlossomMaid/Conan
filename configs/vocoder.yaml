@@ -1,0 +1,47 @@
+# ============================================================================
+# Conan — Stage 3: Causal Shuffle Vocoder
+# Fully causal HiFiGAN with pixel-shuffle upsampling.
+# 600k steps, AdamW (beta1=0.8, beta2=0.99), manual G/D optimization.
+# ============================================================================
+
+audio:
+  sample_rate: 16000
+  n_fft: 1024
+  hop_size: 320
+  win_size: 1024
+  num_mels: 80
+  f0_min: 40.0
+  f0_max: 1100.0
+
+vocoder:
+  upsample_rates: [8, 8, 2, 2]
+  upsample_initial_channel: 512
+  resblock_kernel_sizes: [3, 5, 7]
+  resblock_dilation_sizes: [[1, 3, 5], [1, 3, 5], [1, 3, 5]]
+
+loss:
+  mel_weight: 45.0
+  adv_weight: 1.0
+  fm_weight: 10.0
+
+training:
+  steps: 600000
+  learning_rate: 2e-4
+  batch_size: 6
+  accumulate_grad_batches: 3
+  num_workers: 4
+  accelerator: gpu
+  devices: 1
+  precision: 16-mixed
+  clip_grad: 1.0
+  log_every: 100
+  val_check_interval: 25000
+  num_ckpt_keep: 3
+  max_batch_frames: 0
+
+data:
+  data_dir: datas/libritts
+
+logger: tensorboard
+log_dir: logs/vocoder
+ckpt_dir: ckpts/vocoder

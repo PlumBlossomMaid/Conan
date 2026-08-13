@@ -1,0 +1,56 @@
+# ============================================================================
+# Conan — Stage 1: Stream Content Extractor
+# Trains Emformer to distill HuBERT 256-dim continuous embeddings.
+# MSE regression (no clustering) — SVC-verified approach.
+# 80k steps, Adam (beta1=0.9, beta2=0.98)
+# ============================================================================
+
+task_cls: models.content_extractor.ContentExtractorModel
+
+audio:
+  sample_rate: 16000
+  n_fft: 1024
+  hop_size: 320
+  win_size: 1024
+  num_mels: 80
+  f0_min: 40.0
+  f0_max: 1100.0
+
+content_extractor:
+  d_model: 512
+  nhead: 8
+  num_layers: 6
+  output_dim: 256            # HuBERT continuous embedding dimension
+  chunk_size: 4              # frames per chunk (80ms at 50Hz)
+  left_context: 1
+  right_context: 2           # 0 for strictly causal
+  dim_feedforward: 2048
+  dropout: 0.1
+
+training:
+  steps: 800000
+  learning_rate: 2e-4
+  step_size: 5000
+  gamma: 0.8
+  batch_size: 10
+  accumulate_grad_batches: 3
+  num_workers: 0
+  accelerator: gpu
+  devices: 1
+  precision: 16-mixed
+  clip_grad: 1.0
+  log_every: 500
+  val_check_interval: 1000
+  num_sanity_val_steps: 1
+  num_ckpt_keep: 3
+  max_batch_frames: 0
+  lr_scheduler: step              # StepDecay: LR *= 0.8 every 5000 steps
+
+data:
+  data_dir: datas/libritts
+  hdf5_path: datas/libritts/hubert_embeddings/train.h5
+  val_max_samples: 50
+
+logger: visualdl
+log_dir: logs/content_extractor
+ckpt_dir: ckpts/content_extractor

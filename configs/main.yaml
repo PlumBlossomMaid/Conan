@@ -1,0 +1,70 @@
+# ============================================================================
+# Conan — Stage 2: Main Model
+# Trains Adaptive Style Encoder + Pitch Predictor + Mel Decoder.
+# 160k steps, Adam (beta1=0.9, beta2=0.98), manual G/D optimization.
+# ============================================================================
+
+task_cls: models.conan_main.ConanMainModel
+
+audio:
+  sample_rate: 16000
+  n_fft: 1024
+  hop_size: 320
+  win_size: 1024
+  num_mels: 80
+  f0_min: 40.0
+  f0_max: 1100.0
+
+content_extractor:
+  d_model: 512
+  nhead: 8
+  num_layers: 6
+  output_dim: 256
+  chunk_size: 4
+  left_context: 1
+  right_context: 2
+
+main_model:
+  content_dim: 256          # HuBERT 256-dim continuous embedding
+  timbre_dim: 256
+  style_dim: 64
+  code_dim: 64
+  num_codes: 128
+  style_chunk_size: 4        # 80ms at 50Hz
+  pitch_hidden_dim: 256
+  pitch_num_layers: 3
+  decoder_hidden_dim: 512
+  decoder_num_layers: 5
+
+loss:
+  mae_weight: 1.0
+  ssim_weight: 1.0
+  adv_weight: 0.1
+  fm_weight: 2.0
+  pitch_weight: 1.0
+  vq_weight: 1.0
+  contrastive_weight: 0.1
+
+training:
+  steps: 160000
+  learning_rate: 2e-4
+  batch_size: 2
+  accumulate_grad_batches: 4
+  num_workers: 4
+  accelerator: gpu
+  devices: 1
+  precision: 16-mixed
+  clip_grad: 1.0
+  log_every: 100
+  val_check_interval: 10000
+  num_ckpt_keep: 3
+  max_batch_frames: 0
+
+data:
+  data_dir: datas/libritts
+  hubert_emb_dir: datas/libritts/hubert_embeddings
+  ckpt_content_extractor: ckpts/content_extractor/step_80000.ckpt
+
+logger: tensorboard
+log_dir: logs/main_model
+ckpt_dir: ckpts/main_model

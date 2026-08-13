@@ -1,0 +1,55 @@
+# ============================================================================
+# Conan — 基础配置
+# 所有 Conan 实验继承此配置
+# ============================================================================
+
+# GPU / 设备
+device: cuda
+gpu_id: 0
+
+# 数据
+data:
+  wavs_dir: datas/libritts/wavs
+  output_dir: datas/libritts
+  hubert_onnx: pretrained/hubert.onnx
+  sample_rate: 16000
+  n_valid: 1000  # validation 样本数
+
+# 预处理（Binarizer）
+preprocessing:
+  batch_size: 1
+  num_workers: 1
+  chunk_size: 10
+
+# 训练
+training:
+  accelerator: gpu
+  devices: 1
+  precision: 16-mixed
+  max_steps: 80000
+  learning_rate: 2e-4
+  batch_size: 4
+  accumulate_grad_batches: 2
+  num_workers: 4
+  gradient_clip_val: 1.0
+  log_every_n_steps: 100
+  val_check_interval: 5000
+
+# 模型
+model:
+  content_dim: 256
+  timbre_dim: 256
+  style_dim: 64
+  code_dim: 64
+  num_codes: 128
+  d_model: 512
+  nhead: 8
+  num_layers: 6
+  dim_feedforward: 2048
+  dropout: 0.1
+
+# 日志
+logging:
+  logger: tensorboard
+  log_dir: logs
+  ckpt_dir: ckpts
