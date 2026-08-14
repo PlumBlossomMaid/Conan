@@ -14,7 +14,8 @@ data:
   output_dir: data/libritts
   hubert_emb_dir: data/libritts/hubert_embeddings
   hubert_onnx: weights/hubert_batch.onnx
-  n_valid: 1000
+  n_valid: 150
+  valid_seed: 1234
 
 # 单进程单 ONNX session，使用 ONNX batch 维度并行
 preprocessing:

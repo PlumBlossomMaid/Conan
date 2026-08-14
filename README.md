@@ -104,6 +104,7 @@ All preprocessing and training configuration lives in YAML files under `configs/
 - `data.wavs_dir`: Flattened waveform directory
 - `data.hubert_onnx`: Batched HuBERT ONNX model path
 - `preprocessing.max_batch_size`: ONNX batch size for HuBERT extraction
+- `data.n_valid` / `data.valid_seed`: Random validation sample count and split seed
 - `task_cls`: Model class to instantiate
 - `max_batch_frames`: Dynamic batching for consistent GPU memory
 

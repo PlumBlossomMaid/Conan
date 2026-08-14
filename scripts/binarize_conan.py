@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import json
+import random
 import time
 from pathlib import Path
 from typing import Iterable, Optional, Union
@@ -251,9 +252,16 @@ def main():
         if h5_path.exists():
             raise FileExistsError(f"{h5_path} exists. Delete it manually before re-running.")
 
-    n_valid = min(int(data_cfg.get("n_valid", 1000)), len(files) // 10)
-    train_files = files[:-n_valid] if n_valid else files
-    valid_files = files[-n_valid:] if n_valid else []
+    n_valid = min(int(data_cfg.get("n_valid", 150)), len(files) // 10)
+    valid_seed = int(data_cfg.get("valid_seed", 1234))
+    if n_valid:
+        rng = random.Random(valid_seed)
+        valid_set = set(rng.sample(files, n_valid))
+        train_files = [p for p in files if p not in valid_set]
+        valid_files = sorted(valid_set, key=lambda p: p.stat().st_size)
+    else:
+        train_files = files
+        valid_files = []
 
     import onnxruntime as ort
     ort.set_default_logger_severity(3)
@@ -263,6 +271,7 @@ def main():
 
     print(f"Audio files: {len(files)}", flush=True)
     print(f"Train/valid: {len(train_files)}/{len(valid_files)}", flush=True)
+    print(f"Validation seed: {valid_seed}", flush=True)
     print(f"ONNX model: {onnx_path}", flush=True)
     print(f"ONNX providers: {session.get_providers()}", flush=True)
     print(f"Max batch size: {int(preprocessing_cfg.get('max_batch_size', 8))}", flush=True)
@@ -279,6 +288,9 @@ def main():
         "onnx_model": str(onnx_path.relative_to(PROJECT_ROOT) if onnx_path.is_relative_to(PROJECT_ROOT) else onnx_path),
         "providers": session.get_providers(),
         "max_batch_size": int(preprocessing_cfg.get("max_batch_size", 8)),
+        "n_valid": n_valid,
+        "valid_seed": valid_seed,
+        "split": "random",
         "elapsed_sec": round(time.time() - t0, 3),
     }
     with open(output_dir / "conan_meta.json", "w", encoding="utf-8") as f:
