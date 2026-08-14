@@ -182,15 +182,15 @@ class HubertPreprocessor:
         input_names = {i.name for i in session.get_inputs()}
 
         print(f"Audio files: {len(files)}", flush=True)
-        print(f"Train/valid: {len(train_files)}/{len(valid_files)}", flush=True)
+        print(f"Preprocess splits: train={len(train_files)}, valid={len(valid_files)}", flush=True)
         print(f"Validation seed: {valid_seed}", flush=True)
         print(f"ONNX model: {onnx_path}", flush=True)
         print(f"ONNX providers: {session.get_providers()}", flush=True)
         print(f"Max batch size: {int(self.preprocessing_cfg.get('max_batch_size', 8))}", flush=True)
 
         t0 = time.time()
-        ok_train = self._write_split(train_h5, train_files, session, input_names, "train")
-        ok_valid = self._write_split(valid_h5, valid_files, session, input_names, "valid")
+        ok_train = self._write_split(train_h5, train_files, session, input_names, "preprocess-train")
+        ok_valid = self._write_split(valid_h5, valid_files, session, input_names, "preprocess-valid")
 
         meta = {
             "total": ok_train + ok_valid,
