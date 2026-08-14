@@ -9,17 +9,22 @@ gpu_id: 0
 
 # 数据
 data:
-  wavs_dir: datas/libritts/wavs
-  output_dir: datas/libritts
-  hubert_onnx: pretrained/hubert.onnx
+  archive_dir: data
+  wavs_dir: data/libritts/wavs
+  output_dir: data/libritts
+  hubert_emb_dir: data/libritts/hubert_embeddings
+  hubert_onnx: weights/hubert_batch.onnx
   sample_rate: 16000
   n_valid: 1000  # validation 样本数
 
 # 预处理（Binarizer）
 preprocessing:
-  batch_size: 1
-  num_workers: 1
-  chunk_size: 10
+  extract_archives: true
+  flatten_existing: false
+  max_batch_size: 8
+  onnx_provider: auto
+  device_id: 0
+  allow_cpu_fallback: false
 
 # 训练
 training:

@@ -61,8 +61,8 @@ training:
   max_batch_frames: 0
 
 data:
-  data_dir: datas/libritts
-  hubert_emb_dir: datas/libritts/hubert_embeddings
+  data_dir: data/libritts
+  hubert_emb_dir: data/libritts/hubert_embeddings
   ckpt_content_extractor: ckpts/content_extractor/step_80000.ckpt
 
 logger: tensorboard

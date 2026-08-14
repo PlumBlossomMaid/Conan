@@ -73,11 +73,11 @@ def main():
 
     # ── Dataset ──
     train_dataset = ContentExtractorDataset(
-        hdf5_path=data_cfg.get("hdf5_path", "datas/libritts/hubert_embeddings/train.h5"),
+        hdf5_path=data_cfg.get("hdf5_path", "data/libritts/hubert_embeddings/train.h5"),
         max_frames=audio_cfg.get("max_frames", 500),
     )
     valid_dataset = ContentExtractorDataset(
-        hdf5_path=data_cfg.get("hdf5_path", "datas/libritts/hubert_embeddings/train.h5"),
+        hdf5_path=data_cfg.get("hdf5_path", "data/libritts/hubert_embeddings/train.h5"),
         max_frames=audio_cfg.get("max_frames", 500),
         max_samples=data_cfg["val_max_samples"],
     )

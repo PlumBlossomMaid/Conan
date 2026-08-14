@@ -40,7 +40,7 @@ training:
   max_batch_frames: 0
 
 data:
-  data_dir: datas/libritts
+  data_dir: data/libritts
 
 logger: tensorboard
 log_dir: logs/vocoder

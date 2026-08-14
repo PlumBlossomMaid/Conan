@@ -1,20 +1,26 @@
 # ============================================================================
 # Conan — 二值化（数据预处理）配置
-# 继承 base.yaml，指定 binarizer 和数据路径
+# 继承 base.yaml，所有参数从 config 读取
 # ============================================================================
 
-# 继承基础 config
 base_config: configs/base.yaml
 
-# 使用的 Binarizer 类
 binarizer_cls: scripts.binarize_conan.ConanBinarizer
 
-# 覆盖数据路径
+# 数据路径
 data:
-  wavs_dir: datas/libritts/wavs
-  output_dir: datas/libritts
+  archive_dir: data
+  wavs_dir: data/libritts/wavs
+  output_dir: data/libritts
+  hubert_emb_dir: data/libritts/hubert_embeddings
+  hubert_onnx: weights/hubert_batch.onnx
+  n_valid: 1000
 
-# 预处理参数
+# 单进程单 ONNX session，使用 ONNX batch 维度并行
 preprocessing:
-  num_workers: 1  # 单进程 CUDA
-  chunk_size: 10
+  extract_archives: true
+  flatten_existing: false
+  max_batch_size: 8
+  onnx_provider: auto
+  device_id: 0
+  allow_cpu_fallback: false

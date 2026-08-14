@@ -163,7 +163,7 @@ class ContentExtractorModel(Model):
         data_cfg = self.config.get("data", {})
         audio_cfg = self.config.get("audio", {})
         dataset = ContentExtractorDataset(
-            hdf5_path=data_cfg.get("hdf5_path", "datas/libritts/hubert_embeddings/train.h5"),
+            hdf5_path=data_cfg.get("hdf5_path", "data/libritts/hubert_embeddings/train.h5"),
             max_frames=audio_cfg.get("max_frames", 500),
         )
         return build_train_dataloader(dataset, self.config)
@@ -173,7 +173,7 @@ class ContentExtractorModel(Model):
         data_cfg = self.config.get("data", {})
         audio_cfg = self.config.get("audio", {})
         dataset = ContentExtractorDataset(
-            hdf5_path=data_cfg.get("hdf5_path", "datas/libritts/hubert_embeddings/train.h5"),
+            hdf5_path=data_cfg.get("hdf5_path", "data/libritts/hubert_embeddings/train.h5"),
             max_frames=audio_cfg.get("max_frames", 500),
             max_samples=data_cfg.get("val_max_samples", 50),
         )

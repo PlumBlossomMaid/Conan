@@ -9,7 +9,7 @@ Usage:
     python scripts/rebuild_hdf5.py
 
 Output:
-    datas/libritts/hubert_embeddings/train.h5  (new, old renamed to train_old.h5)
+    data/libritts/hubert_embeddings/train.h5  (new, old renamed to train_old.h5)
 """
 
 import os, sys, time

@@ -60,19 +60,11 @@ pip install -r requirements.txt
 ### 1. Data Preparation
 
 ```bash
-# Prepare your dataset with a flat waveform directory:
-# data/libritts/
-#   wavs/
-#     speaker1_001.wav
-#     speaker1_002.wav
-#     speaker2_001.wav
+# Extract and flatten LibriTTS audio according to configs/binarize.yaml
+python scripts/prepare_libritts.py -c configs/binarize.yaml
 
-# Extract HuBERT embeddings and binarize
-python scripts/binarize_conan.py \
-  --src data/libritts/wavs \
-  --out data/libritts \
-  --onnx weights/hubert4.onnx \
-  --workers 4
+# Extract HuBERT embeddings with one ONNX session and batched inputs
+python scripts/binarize_conan.py -c configs/binarize.yaml
 ```
 
 ### 2. Training
@@ -107,13 +99,13 @@ python scripts/infer_conan.py \
 
 ## Configuration
 
-All training configurations use YAML files in `configs/`. Key parameters:
+All preprocessing and training configuration lives in YAML files under `configs/`. Key parameters:
 
+- `data.wavs_dir`: Flattened waveform directory
+- `data.hubert_onnx`: Batched HuBERT ONNX model path
+- `preprocessing.max_batch_size`: ONNX batch size for HuBERT extraction
 - `task_cls`: Model class to instantiate
-- `work_dir`: Checkpoint save directory
-- `pretrained`: Pretrained checkpoints and frozen parameters
 - `max_batch_frames`: Dynamic batching for consistent GPU memory
-- `use_distributed_sampler`: Enable distributed training
 
 Example configuration structure:
 
