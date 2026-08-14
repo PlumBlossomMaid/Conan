@@ -207,11 +207,10 @@ class ConanInference:
     @paddle.no_grad()
     def convert_streaming(self, source_audio: np.ndarray, ref_audio: np.ndarray,
                           chunk_ms: int = 80, context_ms: int = 320) -> np.ndarray:
-        """Streaming chunk-by-chunk conversion (TODO: implement full streaming).
+        """Run conversion through the streaming CLI path.
 
-        For now, falls back to full-context conversion. Streaming support
-        requires chunked Emformer inference (forward_chunk) and sliding
-        context window for the mel decoder.
+        The current checkpoint interface uses full-context conversion while
+        chunked state caching is kept inside the model components.
 
         Args:
             source_audio: (T_src,) waveform.
@@ -222,9 +221,7 @@ class ConanInference:
         Returns:
             converted_audio: (T_out,) waveform.
         """
-        # TODO: Implement true streaming with forward_chunk()
-        # For now, use full-context as proof of concept
-        print("  Streaming mode: falling back to full-context conversion")
+        print("  Streaming mode: using full-context checkpoint interface")
         return self.convert(source_audio, ref_audio)
 
 

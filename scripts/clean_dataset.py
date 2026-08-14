@@ -12,7 +12,7 @@ MAX_SECONDS = 60
 
 
 def main():
-    src = Path(r"F:\work\konan\datas\libritts\wavs")
+    src = Path("data/libritts/wavs")
     files = sorted(src.glob("*.flac")) + sorted(src.glob("*.wav"))
     print(f"Scanning {len(files)} files (single-process)...", flush=True)
 

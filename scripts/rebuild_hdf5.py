@@ -22,8 +22,8 @@ import paddle
 import ppAudio
 from tqdm import tqdm
 
-SRC = Path(r"F:\work\konan\datas\libritts\wavs")
-OLD_H5_DIR = Path(r"F:\work\konan\datas\libritts\hubert_embeddings")
+SRC = Path("data/libritts/wavs")
+OLD_H5_DIR = Path("data/libritts/hubert_embeddings")
 OUT_H5 = OLD_H5_DIR / "train.h5"
 
 SAMPLE_RATE = 16000

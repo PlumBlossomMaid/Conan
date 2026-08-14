@@ -3,7 +3,7 @@
 Usage:
     python scripts/prepare_libritts.py \\
         --src /path/to/datasets/libritts \\
-        --out /path/to/柯南唱/datas/libritts
+        --out data/libritts
 
 Steps:
     1. Extract all 7 tar.gz files from ``src``

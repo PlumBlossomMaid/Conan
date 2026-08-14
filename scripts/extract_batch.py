@@ -53,7 +53,7 @@ def main():
     p = argparse.ArgumentParser(description="HuBERT batch extraction")
     p.add_argument("--src", required=True)
     p.add_argument("--out", required=True)
-    p.add_argument("--onnx", default=r"F:\work\weights\hubert_batch.onnx")
+    p.add_argument("--onnx", default="weights/hubert_batch.onnx")
     p.add_argument("--max-batch-size", type=int, default=8)
     p.add_argument("--workers", type=int, default=0, help="ignored, single-process only")
     args = p.parse_args()

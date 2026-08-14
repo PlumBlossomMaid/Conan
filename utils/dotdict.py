@@ -1,7 +1,5 @@
 """DotDict — dict with attribute access + Rich pretty printing.
 
-Port from HiddenSinger (如来唱) project.
-
 Usage:
     cfg = DotDict(yaml.load(open("config.yaml")))
     print(cfg.training.batch_size)  # attribute access

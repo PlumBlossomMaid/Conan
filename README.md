@@ -38,8 +38,8 @@ Conan consists of three core components:
 ### Prerequisites
 
 - Python 3.8+
-- PaddlePaddle >= 3.0.0 (recommend manual installation for GPU support)
-- Ocean framework (PaddlePaddle Lightning)
+- PaddlePaddle >= 3.3 (install manually for your accelerator/runtime)
+- Ocean framework
 
 ### Setup
 
@@ -48,12 +48,11 @@ Conan consists of three core components:
 git clone https://github.com/PlumBlossomMaid/Conan.git
 cd Conan
 
-# Install dependencies (excluding PaddlePaddle)
+# Install project dependencies. PaddlePaddle is intentionally not included.
 pip install -r requirements.txt
 
-# Install PaddlePaddle manually
-# For CUDA 11.8:
-python -m pip install paddlepaddle-gpu==3.0.0.post118 -f https://www.paddlepaddle.org.cn/whl/linux/mkl/avx/stable.html
+# Install PaddlePaddle manually for your environment:
+# https://www.paddlepaddle.org.cn/install/quick
 ```
 
 ## Quick Start
@@ -61,21 +60,19 @@ python -m pip install paddlepaddle-gpu==3.0.0.post118 -f https://www.paddlepaddl
 ### 1. Data Preparation
 
 ```bash
-# Prepare your dataset with the following structure:
-# data/
-#   train/
-#     speaker1/
-#       001.wav
-#       002.wav
-#   valid/
-#     speaker2/
-#       001.wav
+# Prepare your dataset with a flat waveform directory:
+# data/libritts/
+#   wavs/
+#     speaker1_001.wav
+#     speaker1_002.wav
+#     speaker2_001.wav
 
 # Extract HuBERT embeddings and binarize
-python konan/scripts/binarize_conan.py \
-  --data_dir data/train \
-  --output_dir data/train_binary \
-  --num_workers 8
+python scripts/binarize_conan.py \
+  --src data/libritts/wavs \
+  --out data/libritts \
+  --onnx weights/hubert4.onnx \
+  --workers 4
 ```
 
 ### 2. Training
@@ -84,27 +81,28 @@ Conan uses a unified training entry point with configuration files:
 
 ```bash
 # Stage 1: Content Extractor (80k steps)
-python konan/scripts/train.py -c configs/content_extractor.yaml
+python scripts/train.py -c configs/content_extractor.yaml
 
 # Stage 2: Main Model with frozen content extractor (160k steps)
-python konan/scripts/train.py -c configs/main.yaml
+python scripts/train.py -c configs/main.yaml
 
 # Stage 3: Causal Shuffle Vocoder (600k steps)
-python konan/scripts/train.py -c configs/vocoder.yaml
+python scripts/train.py -c configs/vocoder.yaml
 ```
 
 ### 3. Inference
 
 ```bash
 # Streaming inference
-python konan/scripts/infer_conan.py \
-  --source_audio source.wav \
-  --reference_audio reference.wav \
-  --output_audio output.wav \
-  --content_ckpt checkpoints/content_extractor/best.pdparams \
-  --main_ckpt checkpoints/conan_main/best.pdparams \
-  --vocoder_ckpt checkpoints/vocoder/best.pdparams \
-  --chunk_size 80  # ms
+python scripts/infer_conan.py \
+  --source source.wav \
+  --reference reference.wav \
+  --output output.wav \
+  --content-ckpt checkpoints/content_extractor/best.pdparams \
+  --main-ckpt checkpoints/conan_main/best.pdparams \
+  --vocoder-ckpt checkpoints/vocoder/best.pdparams \
+  --streaming \
+  --chunk-ms 80
 ```
 
 ## Configuration
@@ -120,7 +118,7 @@ All training configurations use YAML files in `configs/`. Key parameters:
 Example configuration structure:
 
 ```yaml
-task_cls: konan.models.conan_main.ConanMainModel
+task_cls: models.conan_main.ConanMainModel
 work_dir: checkpoints/conan_main
 
 pretrained:
@@ -156,23 +154,22 @@ Built-in support for multi-GPU training:
 
 ```
 Conan/
-├── konan/
-│   ├── layers/               # Core model components
-│   │   ├── stream_content_extractor.py
-│   │   ├── adaptive_style_encoder.py
-│   │   └── causal_shuffle_vocoder.py
-│   ├── models/               # Training models (Ocean Lightning)
-│   │   ├── content_extractor.py
-│   │   ├── conan_main.py
-│   │   └── vocoder.py
-│   ├── scripts/              # CLI tools
-│   │   ├── train.py          # Unified training entry
-│   │   ├── binarize_conan.py
-│   │   └── infer_conan.py
-│   └── utils/                # Utilities
-│       ├── indexed_datasets.py
-│       ├── training_utils.py
-│       └── model_utils.py
+├── layers/                   # Core model components
+│   ├── stream_content_extractor.py
+│   ├── adaptive_style_encoder.py
+│   └── causal_shuffle_vocoder.py
+├── models/                   # Training models (Ocean)
+│   ├── content_extractor.py
+│   ├── conan_main.py
+│   └── vocoder.py
+├── scripts/                  # CLI tools
+│   ├── train.py              # Unified training entry
+│   ├── binarize_conan.py
+│   └── infer_conan.py
+├── utils/                    # Utilities
+│   ├── indexed_datasets.py
+│   ├── training_utils.py
+│   └── model_utils.py
 ├── configs/                  # Training configurations
 │   ├── content_extractor.yaml
 │   ├── main.yaml

@@ -1,11 +1,6 @@
 # Core dependencies
-# Note: PaddlePaddle should be installed manually for optimal GPU support
-# See: https://www.paddlepaddle.org.cn/install/quick
 
-# Deep learning framework
-# paddlepaddle-gpu>=3.0.0  # Install manually, not in requirements
-
-# Ocean framework (PaddlePaddle Lightning)
+# Ocean framework
 ocean-paddle>=0.1.0
 
 # Audio processing
