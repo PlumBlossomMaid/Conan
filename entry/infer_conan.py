@@ -1,7 +1,7 @@
 """Conan inference — streaming zero-shot voice conversion.
 
 Usage:
-    python scripts/infer_conan.py \
+    python entry/infer_conan.py \
         --content-ckpt ckpts/content_extractor/step_80000.ckpt \
         --main-ckpt ckpts/main_model/step_160000.ckpt \
         --vocoder-ckpt ckpts/vocoder/step_600000.ckpt \
@@ -21,13 +21,15 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+import librosa
+import numpy as np
+import paddle
+import soundfile as sf
+import yaml
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-import yaml
-import numpy as np
-import paddle
 
 from layers.stream_content_extractor import StreamContentExtractor
 from layers.timbre_encoder import TimbreEncoder
@@ -35,16 +37,6 @@ from layers.adaptive_style_encoder import AdaptiveStyleEncoder
 from layers.causal_pitch_predictor import CausalPitchPredictor
 from layers.causal_mel_decoder import CausalMelDecoder
 from layers.causal_shuffle_vocoder import CausalShuffleVocoder
-
-try:
-    import soundfile as sf
-except ImportError:
-    sf = None
-
-try:
-    import librosa
-except ImportError:
-    librosa = None
 
 
 def load_config(path: str) -> dict:
@@ -69,8 +61,6 @@ def load_checkpoint(model: paddle.nn.Layer, path: str, prefix: str = ""):
 def compute_mel(audio: np.ndarray, sr: int, n_mels: int = 80,
                 n_fft: int = 1024, hop_size: int = 320) -> np.ndarray:
     """Compute mel-spectrogram from audio."""
-    if librosa is None:
-        raise ImportError("librosa required for mel computation")
     spec = librosa.stft(audio, n_fft=n_fft, hop_length=hop_size, win_length=n_fft)
     mag = np.abs(spec)
     mel_basis = librosa.filters.mel(sr=sr, n_fft=n_fft, n_mels=n_mels)
@@ -238,15 +228,9 @@ def main():
     parser.add_argument("--chunk-ms", type=int, default=80, help="Chunk size in ms")
     args = parser.parse_args()
 
-    if sf is None:
-        raise ImportError("soundfile is required for audio I/O")
-
     config = load_config(args.config)
 
     # Load audio
-    if librosa is None:
-        raise ImportError("librosa is required for audio loading")
-
     source, _ = librosa.load(args.source, sr=config["audio"]["sample_rate"], mono=True)
     reference, _ = librosa.load(args.reference, sr=config["audio"]["sample_rate"], mono=True)
     print(f"  Source: {len(source) / config['audio']['sample_rate']:.2f}s")

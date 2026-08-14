@@ -7,6 +7,7 @@ Training: 600k steps (per paper), with HiFiGAN-style losses.
 
 from typing import Any, List, Optional
 
+import numpy as np
 import paddle
 import paddle.nn as nn
 import paddle.nn.functional as F
@@ -164,7 +165,6 @@ class VocoderModel(Model):
         return F.l1_loss(audio_mel, mel_gt)
 
     def _init_mel_basis(self, sr, n_fft, n_mels):
-        import numpy as np
         fmax = sr / 2
         def hz2mel(h): return 2595.0 * np.log10(1.0 + h / 700.0)
         def mel2hz(m): return 700.0 * (10.0 ** (m / 2595.0) - 1.0)

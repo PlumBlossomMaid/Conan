@@ -8,6 +8,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 os.environ['GLOG_minloglevel'] = '3'
 
 import numpy as np
+import onnx
+import onnxruntime as ort
 import paddle
 from paddle.static import InputSpec
 import paddle.nn as nn
@@ -91,7 +93,6 @@ def debug_outputs():
     print(f"ONNX export OK: {os.path.getsize(onnx_path)/1024:.1f}KB")
     
     # ── ONNX Runtime ──
-    import onnxruntime as ort
     sess = ort.InferenceSession(onnx_path, providers=['CPUExecutionProvider'])
     onnx_input_name = sess.get_inputs()[0].name
     onnx_out = sess.run(None, {onnx_input_name: mel_np})[0]
@@ -115,7 +116,6 @@ def debug_outputs():
     # Run intermediate outputs through both PIR and ONNX
     # This requires modifying the model, so let's just compare
     # the ONNX graph structure
-    import onnx
     onnx_model = onnx.load(onnx_path)
     
     # Count ops

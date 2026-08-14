@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 os.environ['GLOG_minloglevel'] = '3'
 
 import numpy as np
+import onnxruntime as ort
 import paddle
 from paddle.static import InputSpec
 import paddle.nn as nn
@@ -159,7 +160,6 @@ def test(name, model_fn, input_fns, specs, warmup=5, repeat=30):
     size_kb = os.path.getsize(onnx_path) / 1024
 
     try:
-        import onnxruntime as ort
         sess = ort.InferenceSession(onnx_path,
             providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
         onnx_ins = {sess.get_inputs()[i].name: inp.numpy() for i, inp in enumerate(inputs)}

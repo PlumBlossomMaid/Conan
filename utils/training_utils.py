@@ -215,8 +215,6 @@ def build_dataloader(dataset, batch_sampler, num_workers=4, collate_fn=None):
     Returns:
         Paddle DataLoader.
     """
-    from paddle.io import DataLoader
-
     if collate_fn is None:
         collate_fn = getattr(dataset, "collater", None)
 

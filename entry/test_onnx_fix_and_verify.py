@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 os.environ['GLOG_minloglevel'] = '3'
 
 import numpy as np
+import onnxruntime as ort
 import paddle
 from paddle.static import InputSpec
 import paddle.nn as nn
@@ -192,7 +193,6 @@ def test_and_verify(name, model_fn, input_fns, specs):
 
     # ── ONNX Runtime verification ──
     try:
-        import onnxruntime as ort
         ort_sess = ort.InferenceSession(onnx_path,
             providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
         
@@ -222,8 +222,6 @@ def test_and_verify(name, model_fn, input_fns, specs):
         print(f"       PIR vs ONNX  : max_diff={diff_po:.3e}")
         print(f"       eager vs ONNX: max_diff={diff_eo:.3e}  cos_sim={cos_sim:.6f}  {status}")
         
-    except ImportError:
-        print(f"       (skipped ONNX Runtime verification — import onnxruntime failed)")
     except Exception as e:
         print(f"       (ONNX Runtime error: {e})")
 

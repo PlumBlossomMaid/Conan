@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 os.environ['GLOG_minloglevel'] = '3'
 
 import numpy as np
+import onnxruntime as ort
 import paddle
 from paddle.static import InputSpec
 import paddle.nn as nn
@@ -189,7 +190,6 @@ def test_component(name, model_fn, input_gen, specs, warmup=5, repeat=30):
             if line.strip(): print(f"     {line.strip()[:120]}")
         return
     
-    import onnxruntime as ort
     providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
     sess = ort.InferenceSession(onnx_path, providers=providers)
     

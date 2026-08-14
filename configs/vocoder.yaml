@@ -1,8 +1,10 @@
 # ============================================================================
-# Conan — Stage 3: Causal Shuffle Vocoder
+# Conan — Stage 2: Causal Shuffle Vocoder
 # Fully causal HiFiGAN with pixel-shuffle upsampling.
 # 600k steps, AdamW (beta1=0.8, beta2=0.99), manual G/D optimization.
 # ============================================================================
+
+task_cls: models.vocoder.VocoderModel
 
 audio:
   sample_rate: 16000

@@ -6,7 +6,7 @@ copies HuBERT embeddings, reads audio and computes mel via
 GPU-batched ppAudio, writes new HDF5 with filename keys.
 
 Usage:
-    python scripts/rebuild_hdf5.py
+    python entry/rebuild_hdf5.py
 
 Output:
     data/libritts/hubert_embeddings/train.h5  (new, old renamed to train_old.h5)
@@ -117,26 +117,18 @@ def main():
         for fpath in batch_files:
             name = fpath.stem
             rank = name_to_rank[name]
-            try:
-                audio, _ = sf.read(str(fpath), dtype="float32")
-                if audio.ndim > 1:
-                    audio = audio.mean(1)
-                audios.append(audio)
+            audio, _ = sf.read(str(fpath), dtype="float32")
+            if audio.ndim > 1:
+                audio = audio.mean(1)
+            audios.append(audio)
 
-                # HuBERT from old HDF5
-                if rank < n_train:
-                    emb = train_h5[f"{rank:08d}"]["hubert"][()]
-                else:
-                    emb = valid_h5[f"{rank - n_train:08d}"]["hubert"][()]
-                batch_embs.append(emb)
-                batch_names.append(name)
-            except Exception as e:
-                print(f"\n[SKIP] {name}: {e}", flush=True)
-                pbar.update(1)
-                continue
-
-        if not audios:
-            continue
+            # HuBERT from old HDF5
+            if rank < n_train:
+                emb = train_h5[f"{rank:08d}"]["hubert"][()]
+            else:
+                emb = valid_h5[f"{rank - n_train:08d}"]["hubert"][()]
+            batch_embs.append(emb)
+            batch_names.append(name)
 
         # GPU batched mel
         mels = compute_mels_batch(audios)

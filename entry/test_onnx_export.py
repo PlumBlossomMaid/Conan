@@ -9,7 +9,7 @@
   model.eval() → paddle.jit.to_static() → paddle.jit.save() → paddle2onnx → onnx.checker
 
 用法：
-    python scripts/test_onnx_export.py [--quick] [--sub]
+    python entry/test_onnx_export.py [--quick] [--sub]
     --quick: 只测组件级，不测子组件
     --sub:   只测子组件（用于二分法深入）
 """
@@ -17,12 +17,13 @@
 import sys, os, tempfile, shutil, traceback
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-os.environ["GLOG_minloglevel"] = "3"  # suppress PIR logging
-
+import onnx
 import numpy as np
 import paddle
 from paddle.static import InputSpec
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+os.environ["GLOG_minloglevel"] = "3"  # suppress PIR logging
 
 # ── 层导入 ──
 from layers.timbre_encoder import TimbreEncoder
@@ -94,7 +95,6 @@ def _export_onnx(model_dir, name, save_path, verbose=False):
 
 def _verify_onnx(onnx_path):
     """onnx.checker 校验。"""
-    import onnx
     model = onnx.load(onnx_path)
     onnx.checker.check_model(model)
     return True

@@ -1,7 +1,7 @@
 """Benchmark fused streaming converter with full PIR + CINN compilation.
 
 Usage:
-    nohup python scripts/bench_fused_pir.py > bench_fused.log 2>&1 &
+    nohup python entry/bench_fused_pir.py > bench_fused.log 2>&1 &
     tail -f bench_fused.log
 """
 

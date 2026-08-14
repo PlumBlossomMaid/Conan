@@ -1,11 +1,11 @@
 # ============================================================================
-# Conan — 二值化（数据预处理）配置
-# 继承 base.yaml，所有参数从 config 读取
+# Conan — Preprocess: HuBERT distillation targets
+# Produces mel + HuBERT HDF5 files for Stage 1 content-extractor training.
 # ============================================================================
 
 base_config: configs/base.yaml
 
-binarizer_cls: scripts.binarize_conan.ConanBinarizer
+preprocess_cls: entry.preprocess_hubert.HubertPreprocessor
 
 # 数据路径
 data:

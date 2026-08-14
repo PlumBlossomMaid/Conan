@@ -4,6 +4,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 os.environ['GLOG_minloglevel'] = '3'
 
 import numpy as np
+import onnx
+import onnxruntime as ort
 import paddle
 from paddle.static import InputSpec
 import paddle.nn as nn
@@ -49,14 +51,12 @@ r = sp.run(['paddle2onnx', '--model_dir', d,
 if r.returncode != 0:
     print(f'  ONNX export FAILED: {r.stderr[-300:]}')
 else:
-    import onnx
     onnx_model = onnx.load(os.path.join(d, 'out.onnx'))
     op_types = {}
     for node in onnx_model.graph.node:
         op_types[node.op_type] = op_types.get(node.op_type, 0) + 1
     print(f'  ONNX graph ops: {op_types}')
-    
-    import onnxruntime as ort
+
     sess = ort.InferenceSession(os.path.join(d, 'out.onnx'),
         providers=['CPUExecutionProvider'])
     onnx_out = sess.run(None,
@@ -96,7 +96,6 @@ r2 = sp.run(['paddle2onnx', '--model_dir', d2,
 if r2.returncode != 0:
     print(f'  ONNX export FAILED: {r2.stderr[-300:]}')
 else:
-    import onnxruntime as ort
     sess2 = ort.InferenceSession(os.path.join(d2, 'out.onnx'),
         providers=['CPUExecutionProvider'])
     onnx_out2 = sess2.run(None,
@@ -135,7 +134,6 @@ r3 = sp.run(['paddle2onnx', '--model_dir', d3,
 if r3.returncode != 0:
     print(f'  ONNX export FAILED: {r3.stderr[-300:]}')
 else:
-    import onnxruntime as ort
     sess3 = ort.InferenceSession(os.path.join(d3, 'out.onnx'),
         providers=['CPUExecutionProvider'])
     onnx_out3 = sess3.run(None,

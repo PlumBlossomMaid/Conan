@@ -1,5 +1,5 @@
 # ============================================================================
-# Conan — Stage 2: Main Model
+# Conan — Stage 3: Main Model
 # Trains Adaptive Style Encoder + Pitch Predictor + Mel Decoder.
 # 160k steps, Adam (beta1=0.9, beta2=0.98), manual G/D optimization.
 # ============================================================================

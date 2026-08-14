@@ -77,7 +77,7 @@ temp/
 *.bak
 *.cache
 *.pid
-scripts/hubert_extract_pid.txt
+entry/hubert_extract_pid.txt
 
 # OS
 Thumbs.db

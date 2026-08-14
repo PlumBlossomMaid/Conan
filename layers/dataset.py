@@ -15,15 +15,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import h5py
+import librosa
 import numpy as np
+import onnxruntime as ort
 import paddle
 import paddle.nn.functional as F
 from paddle.io import Dataset
-
-try:
-    import librosa
-except ImportError:
-    librosa = None
 
 
 class ConanDataset(Dataset):
@@ -138,7 +135,6 @@ class ConanDataset(Dataset):
 
     def _init_hubert_onnx(self, model_path: str):
         """Initialize HuBERT ONNX Runtime session (CPU, to coexist with Paddle GPU)."""
-        import onnxruntime as ort
         self._hubert_session = ort.InferenceSession(
             model_path, providers=['CPUExecutionProvider']
         )
@@ -146,8 +142,6 @@ class ConanDataset(Dataset):
 
     def _get_mel_basis(self) -> np.ndarray:
         if self._mel_basis is None:
-            if librosa is None:
-                raise ImportError("librosa is required for mel computation")
             self._mel_basis = librosa.filters.mel(
                 sr=self.sample_rate,
                 n_fft=self.n_fft,
@@ -164,9 +158,6 @@ class ConanDataset(Dataset):
         Returns:
             mel: (n_mels, T_mel) float32.
         """
-        if librosa is None:
-            raise ImportError("librosa is required for mel computation")
-
         spec = librosa.stft(
             audio,
             n_fft=self.n_fft,
@@ -234,8 +225,6 @@ class ConanDataset(Dataset):
         Returns:
             audio: (T,) float32 in [-1, 1].
         """
-        if librosa is None:
-            raise ImportError("librosa is required for audio loading")
         audio, sr = librosa.load(path, sr=self.sample_rate, mono=True)
         return audio.astype(np.float32)
 

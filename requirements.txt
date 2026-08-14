@@ -1,7 +1,7 @@
 # Core dependencies
 
 # Ocean framework
-ocean-paddle>=0.1.0
+paddleocean @ git+https://github.com/PlumBlossomMaid/PaddleOcean.git
 
 # Audio processing
 librosa>=0.10.0
@@ -11,7 +11,7 @@ resampy>=0.4.2
 
 # Data storage
 h5py>=3.8.0
-numpy>=1.24.0
+numpy>=1.24.0,<2.0
 
 # Configuration
 pyyaml>=6.0
@@ -26,9 +26,12 @@ colorama>=0.4.6
 tensorboard>=2.13.0
 matplotlib>=3.7.0
 
-# ONNX export (optional)
+# ONNX export / HuBERT preprocessing
 onnx>=1.14.0
-onnxruntime>=1.15.0
+# Install exactly one ONNX Runtime package manually for your accelerator/runtime:
+#   CPU:  onnxruntime
+#   CUDA: onnxruntime-gpu
+#   ROCm: onnxruntime-rocm or a custom ROCm wheel
 
 # Development tools (optional)
 black>=23.0.0

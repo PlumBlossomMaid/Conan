@@ -60,11 +60,11 @@ pip install -r requirements.txt
 ### 1. Data Preparation
 
 ```bash
-# Extract and flatten LibriTTS audio according to configs/binarize.yaml
-python scripts/prepare_libritts.py -c configs/binarize.yaml
+# Extract and flatten LibriTTS audio
+python entry/preprocess.py -c configs/preprocess_libritts.yaml
 
-# Extract HuBERT embeddings with one ONNX session and batched inputs
-python scripts/binarize_conan.py -c configs/binarize.yaml
+# Extract HuBERT distillation targets with one ONNX session and batched inputs
+python entry/preprocess.py -c configs/preprocess_hubert.yaml
 ```
 
 ### 2. Training
@@ -72,21 +72,21 @@ python scripts/binarize_conan.py -c configs/binarize.yaml
 Conan uses a unified training entry point with configuration files:
 
 ```bash
-# Stage 1: Content Extractor (80k steps)
-python scripts/train.py -c configs/content_extractor.yaml
+# Stage 1: Distill HuBERT into the Stream Content Extractor
+python entry/train.py -c configs/content_extractor.yaml
 
-# Stage 2: Main Model with frozen content extractor (160k steps)
-python scripts/train.py -c configs/main.yaml
+# Stage 2: Train the Causal Shuffle Vocoder
+python entry/train.py -c configs/vocoder.yaml
 
-# Stage 3: Causal Shuffle Vocoder (600k steps)
-python scripts/train.py -c configs/vocoder.yaml
+# Stage 3: Train the main conversion model with the frozen content extractor
+python entry/train.py -c configs/main.yaml
 ```
 
 ### 3. Inference
 
 ```bash
 # Streaming inference
-python scripts/infer_conan.py \
+python entry/infer_conan.py \
   --source source.wav \
   --reference reference.wav \
   --output output.wav \
@@ -155,18 +155,20 @@ Conan/
 │   ├── content_extractor.py
 │   ├── conan_main.py
 │   └── vocoder.py
-├── scripts/                  # CLI tools
+├── entry/                    # CLI entry points
+│   ├── preprocess.py         # Unified preprocessing entry
 │   ├── train.py              # Unified training entry
-│   ├── binarize_conan.py
 │   └── infer_conan.py
 ├── utils/                    # Utilities
 │   ├── indexed_datasets.py
 │   ├── training_utils.py
 │   └── model_utils.py
-├── configs/                  # Training configurations
+├── configs/                  # Preprocessing and training configurations
+│   ├── preprocess_libritts.yaml
+│   ├── preprocess_hubert.yaml
 │   ├── content_extractor.yaml
-│   ├── main.yaml
-│   └── vocoder.yaml
+│   ├── vocoder.yaml
+│   └── main.yaml
 └── requirements.txt
 ```
 

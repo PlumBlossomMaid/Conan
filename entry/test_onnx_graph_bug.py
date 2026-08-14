@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 os.environ['GLOG_minloglevel'] = '3'
 
 import numpy as np
+import onnxruntime as ort
 import paddle
 from paddle.static import InputSpec
 import paddle.nn as nn
@@ -36,7 +37,6 @@ def test_model(name, model_fn, input_spec):
         return
     
     try:
-        import onnxruntime as ort
         sess = ort.InferenceSession(os.path.join(d, 'out.onnx'),
             providers=['CPUExecutionProvider'])
         onnx_out = sess.run(None,

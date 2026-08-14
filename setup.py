@@ -34,12 +34,12 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
-        "ocean-paddle>=0.1.0",
+        "paddleocean @ git+https://github.com/PlumBlossomMaid/PaddleOcean.git",
         "librosa>=0.10.0",
         "soundfile>=0.12.0",
         "scipy>=1.10.0",
         "h5py>=3.8.0",
-        "numpy>=1.24.0",
+        "numpy>=1.24.0,<2.0",
         "pyyaml>=6.0",
         "omegaconf>=2.3.0",
         "click>=8.1.0",
@@ -48,14 +48,14 @@ setup(
         "matplotlib>=3.7.0",
     ],
     extras_require={
-        "onnx": ["onnx>=1.14.0", "onnxruntime>=1.15.0"],
+        "onnx": ["onnx>=1.14.0"],
         "dev": ["black>=23.0.0", "flake8>=6.0.0", "pytest>=7.3.0"],
     },
     entry_points={
         "console_scripts": [
-            "conan-train=scripts.train:main",
-            "conan-infer=scripts.infer_conan:main",
-            "conan-binarize=scripts.binarize_conan:main",
+            "conan-preprocess=entry.preprocess:main",
+            "conan-train=entry.train:main",
+            "conan-infer=entry.infer_conan:main",
         ],
     },
 )

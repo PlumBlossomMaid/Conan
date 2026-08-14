@@ -3,9 +3,9 @@
 The stage is selected entirely by the config file's ``task_cls``, so every stage
 shares one command:
 
-    python scripts/train.py -c configs/content_extractor.yaml
-    python scripts/train.py -c configs/main.yaml
-    python scripts/train.py -c configs/vocoder.yaml
+    python entry/train.py -c configs/content_extractor.yaml
+    python entry/train.py -c configs/vocoder.yaml
+    python entry/train.py -c configs/main.yaml
 
 ``-c`` is the only accepted argument; everything else lives in the config.
 """

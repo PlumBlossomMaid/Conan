@@ -5,7 +5,7 @@
 3. Measure latency + RTF
 
 Usage:
-    python scripts/bench_inference.py
+    python entry/bench_inference.py
 """
 
 import sys
