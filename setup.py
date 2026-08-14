@@ -53,9 +53,9 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "conan-train=konan.scripts.train:main",
-            "conan-infer=konan.scripts.infer_conan:main",
-            "conan-binarize=konan.scripts.binarize_conan:main",
+            "conan-train=scripts.train:main",
+            "conan-infer=scripts.infer_conan:main",
+            "conan-binarize=scripts.binarize_conan:main",
         ],
     },
 )
