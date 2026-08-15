@@ -10,7 +10,7 @@ from .model_utils import (
     load_pretrained_with_frozen,
 )
 from .training_utils import (
-    DsBatchSampler,
+    ConanBatchSampler,
     build_dataloader,
     build_train_dataloader,
     build_val_dataloader,
@@ -25,7 +25,7 @@ __all__ = [
     "count_parameters",
     "print_model_summary",
     "load_pretrained_with_frozen",
-    "DsBatchSampler",
+    "ConanBatchSampler",
     "build_dataloader",
     "build_train_dataloader",
     "build_val_dataloader",

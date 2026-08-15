@@ -9,17 +9,16 @@ HuBERT labels will be computed via ONNX Runtime in production.
 Currently supports pre-computed HuBERT labels from HDF5.
 """
 
-import os
 import random
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import h5py
 import librosa
 import numpy as np
 import onnxruntime as ort
 import paddle
-import paddle.nn.functional as F
+import soundfile as sf
 from paddle.io import Dataset
 
 
@@ -122,6 +121,8 @@ class ConanDataset(Dataset):
         if len(self.source_files) == 0:
             raise RuntimeError(f"No audio files found in {data_dir}")
 
+        self.sizes = [self._estimate_frames(path) for path in self.source_files]
+
         print(f"  ConanDataset: {len(self.source_files)} source files, {len(self.ref_files)} ref files")
 
         # STFT and mel basis (lazy init in __getitem__)
@@ -139,6 +140,16 @@ class ConanDataset(Dataset):
             model_path, providers=['CPUExecutionProvider']
         )
         print(f"  HuBERT ONNX loaded (CPU): {model_path}")
+
+    def _estimate_frames(self, path: str) -> int:
+        info = sf.info(path)
+        frames = int(info.frames)
+        if info.samplerate != self.sample_rate:
+            frames = int(np.ceil(frames * self.sample_rate / info.samplerate))
+        return max(1, int(np.ceil(frames / self.hop_size)))
+
+    def num_frames(self, idx: int) -> int:
+        return self.sizes[idx]
 
     def _get_mel_basis(self) -> np.ndarray:
         if self._mel_basis is None:
@@ -380,7 +391,6 @@ class ConanDataset(Dataset):
                 elif T_emb < pad_shared_len:
                     emb = np.pad(emb, [(0, pad_shared_len - T_emb), (0, 0)], mode="constant")
                 padded_embs.append(emb)
-            batch["hubert_emb"] = paddle.to_tensor(np.stack(padded_embs, axis=0), dtype=paddle.float32)
 
         lengths = np.array([m.shape[-1] for m in source_mels], dtype=np.int64)
 
@@ -391,6 +401,8 @@ class ConanDataset(Dataset):
             "f0": paddle.to_tensor(np.stack(padded_f0s, axis=0), dtype=paddle.float32).unsqueeze(-1),
             "lengths": paddle.to_tensor(lengths),
         }
+        if has_hubert:
+            batch["hubert_emb"] = paddle.to_tensor(np.stack(padded_embs, axis=0), dtype=paddle.float32)
         return batch
 
 
@@ -413,7 +425,7 @@ class ContentExtractorDataset(Dataset):
         self._h5f = None
 
         # List keys from HDF5. Mel frame counts are read from the dataset shapes
-        # (metadata only, no sample data) so DsBatchSampler can batch by frames.
+        # (metadata only, no sample data) so ConanBatchSampler can batch by frames.
         with h5py.File(hdf5_path, 'r') as f:
             keys = sorted(f.keys())
             if max_samples:

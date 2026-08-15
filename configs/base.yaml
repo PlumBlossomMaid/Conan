@@ -23,6 +23,7 @@ preprocessing:
   extract_archives: true
   flatten_existing: false
   max_batch_size: 8
+  max_batch_frames: 0
   onnx_provider: auto
   device_id: 0
   allow_cpu_fallback: false
@@ -35,6 +36,8 @@ training:
   max_steps: 80000
   learning_rate: 2e-4
   batch_size: 4
+  max_batch_frames: 0
+  sampler_frame_count_grid: 50
   accumulate_grad_batches: 2
   num_workers: 4
   gradient_clip_val: 1.0

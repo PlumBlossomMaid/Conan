@@ -10,9 +10,10 @@ Usage:
 
 import json
 import random
+import sys
 import time
 from pathlib import Path
-from typing import Iterable, Union
+from typing import Union
 
 import h5py
 import librosa
@@ -22,6 +23,11 @@ import soundfile as sf
 from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from layers.batching import batch_by_files
+
 AUDIO_SUFFIXES = {".wav", ".flac"}
 
 
@@ -35,9 +41,37 @@ def _list_audio(src: Path) -> list[Path]:
     return sorted(files, key=lambda p: p.stat().st_size)
 
 
-def _batches(files: list[Path], batch_size: int) -> Iterable[list[Path]]:
-    for start in range(0, len(files), batch_size):
-        yield files[start:start + batch_size]
+def _batches(
+    files: list[Path],
+    max_batch_size: int,
+    max_batch_frames: int,
+    sample_rate: int,
+    hop_size: int,
+) -> list[list[Path]]:
+    if max_batch_frames <= 0:
+        return batch_by_files(
+            files,
+            lambda path: 1,
+            max_batch_frames=0,
+            max_batch_size=max_batch_size,
+            sort_by_len=False,
+        )
+    return batch_by_files(
+        files,
+        lambda path: _estimate_mel_frames(path, sample_rate, hop_size),
+        max_batch_frames=max_batch_frames,
+        max_batch_size=max_batch_size,
+        sort_by_len=True,
+        grid=1,
+    )
+
+
+def _estimate_mel_frames(path: Path, sample_rate: int, hop_size: int) -> int:
+    info = sf.info(str(path))
+    frames = int(info.frames)
+    if info.samplerate != sample_rate:
+        frames = int(np.ceil(frames * sample_rate / info.samplerate))
+    return max(1, int(np.ceil(frames / hop_size)))
 
 
 def _hubert_frames(n_samples: int) -> int:
@@ -181,12 +215,16 @@ class HubertPreprocessor:
         session = ort.InferenceSession(str(onnx_path), providers=providers)
         input_names = {i.name for i in session.get_inputs()}
 
+        max_batch_size = int(self.preprocessing_cfg.get("max_batch_size", 8))
+        max_batch_frames = int(self.preprocessing_cfg.get("max_batch_frames", 0))
+
         print(f"Audio files: {len(files)}", flush=True)
         print(f"Preprocess splits: train={len(train_files)}, valid={len(valid_files)}", flush=True)
         print(f"Validation seed: {valid_seed}", flush=True)
         print(f"ONNX model: {onnx_path}", flush=True)
         print(f"ONNX providers: {session.get_providers()}", flush=True)
-        print(f"Max batch size: {int(self.preprocessing_cfg.get('max_batch_size', 8))}", flush=True)
+        print(f"Max batch size: {max_batch_size}", flush=True)
+        print(f"Max batch frames: {max_batch_frames if max_batch_frames > 0 else 'disabled'}", flush=True)
 
         t0 = time.time()
         ok_train = self._write_split(train_h5, train_files, session, input_names, "preprocess-train")
@@ -199,7 +237,8 @@ class HubertPreprocessor:
             "wavs_dir": str(wavs_dir.relative_to(PROJECT_ROOT) if wavs_dir.is_relative_to(PROJECT_ROOT) else wavs_dir),
             "onnx_model": str(onnx_path.relative_to(PROJECT_ROOT) if onnx_path.is_relative_to(PROJECT_ROOT) else onnx_path),
             "providers": session.get_providers(),
-            "max_batch_size": int(self.preprocessing_cfg.get("max_batch_size", 8)),
+            "max_batch_size": max_batch_size,
+            "max_batch_frames": max_batch_frames,
             "n_valid": n_valid,
             "valid_seed": valid_seed,
             "split": "random",
@@ -218,8 +257,10 @@ class HubertPreprocessor:
         split_name: str,
     ) -> int:
         batch_size = int(self.preprocessing_cfg.get("max_batch_size", 8))
-        if batch_size <= 0:
-            raise ValueError("preprocessing.max_batch_size must be positive")
+        max_batch_frames = int(self.preprocessing_cfg.get("max_batch_frames", 0))
+        sample_rate = int(self.audio_cfg.get("sample_rate", 16000))
+        hop_size = int(self.audio_cfg.get("hop_size", 320))
+        batches = _batches(files, batch_size, max_batch_frames, sample_rate, hop_size)
 
         ok = 0
         with h5py.File(h5_path, "w") as h5f:
@@ -234,7 +275,7 @@ class HubertPreprocessor:
 
             pbar = tqdm(total=len(files), desc=split_name, unit="files", dynamic_ncols=True)
             start_time = time.time()
-            for batch_files in _batches(files, batch_size):
+            for batch_files in batches:
                 samples = _load_batch(batch_files, self.audio_cfg)
                 emb = _run_hubert_batch(session, input_names, samples)
                 for i, sample in enumerate(samples):

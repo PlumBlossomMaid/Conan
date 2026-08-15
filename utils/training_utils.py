@@ -1,22 +1,24 @@
-"""Distributed training utilities adapted from DiffSinger."""
+"""Distributed training utilities for Conan."""
 
 import numpy as np
 import paddle.distributed as dist
 from paddle.io import DataLoader, Sampler
 
+from layers.batching import batch_by_files
 
-class DsBatchSampler(Sampler):
+
+class ConanBatchSampler(Sampler):
     """Dynamic batch sampler for distributed training.
 
     Features:
-    - Batch by total frames (for consistent GPU memory usage)
-    - Sort by similar size (for efficient padding)
+    - Batch by padded frame budget for consistent GPU memory usage
+    - Sort by similar size for efficient padding
     - Distributed sampling across multiple GPUs
     - Optional shuffling at sample and batch levels
 
     Args:
         dataset: Dataset with `sizes` and `num_frames()` methods.
-        max_batch_frames: Maximum total frames per batch.
+        max_batch_frames: Maximum padded frames per batch.
         max_batch_size: Maximum number of samples per batch.
         num_replicas: Number of distributed processes.
         rank: Rank of current process.
@@ -24,7 +26,7 @@ class DsBatchSampler(Sampler):
         shuffle_batch: Shuffle batches before distributing.
         sort_by_similar_size: Group similar-length samples for efficiency.
         size_reversed: Reverse sort order (longest first).
-        frame_count_grid: Grid size for size-based sorting (default: 5000 frames).
+        frame_count_grid: Grid size for size-based sorting (default: 50 frames).
         seed: Random seed.
         drop_last: Drop incomplete batches at the end.
     """
@@ -40,7 +42,7 @@ class DsBatchSampler(Sampler):
         shuffle_batch=True,
         sort_by_similar_size=True,
         size_reversed=False,
-        frame_count_grid=5000,
+        frame_count_grid=50,
         seed=0,
         drop_last=False,
     ):
@@ -75,44 +77,25 @@ class DsBatchSampler(Sampler):
         # Create indices
         indices = np.arange(len(self.dataset))
 
+        sizes = np.asarray(self.dataset.sizes)
         if self.shuffle_sample:
             rng.shuffle(indices)
+        if self.sort_by_similar_size:
+            approx = (np.round(sizes[indices] / self.frame_count_grid) * self.frame_count_grid)
+            approx = approx.clip(self.frame_count_grid, None)
+            if self.size_reversed:
+                approx *= -1
+            indices = indices[np.argsort(approx, kind='mergesort')]
 
-            if self.sort_by_similar_size:
-                # Group by similar sizes for efficient batching
-                sizes = np.array(self.dataset.sizes)[indices]
-                sizes = (np.round(sizes / self.frame_count_grid) * self.frame_count_grid)
-                sizes = sizes.clip(self.frame_count_grid, None)
-
-                if self.size_reversed:
-                    sizes *= -1
-
-                indices = indices[np.argsort(sizes, kind='mergesort')]
-
-        indices = indices.tolist()
-
-        # Batch by size
-        batches = []
-        current_batch = []
-        current_frames = 0
-
-        for idx in indices:
-            num_frames = self.dataset.num_frames(idx)
-
-            # Check if adding this sample exceeds limits
-            if (len(current_batch) > 0 and
-                (current_frames + num_frames > self.max_batch_frames or
-                 len(current_batch) >= self.max_batch_size)):
-                batches.append(current_batch)
-                current_batch = []
-                current_frames = 0
-
-            current_batch.append(idx)
-            current_frames += num_frames
-
-        # Add last batch
-        if len(current_batch) > 0 and not self.drop_last:
-            batches.append(current_batch)
+        batches = batch_by_files(
+            indices.tolist(),
+            self.dataset.num_frames,
+            max_batch_frames=self.max_batch_frames,
+            max_batch_size=self.max_batch_size,
+            sort_by_len=False,
+        )
+        if self.drop_last and batches:
+            batches = batches[:-1]
 
         # Shuffle batches
         if self.shuffle_batch:
@@ -139,7 +122,7 @@ class DsBatchSampler(Sampler):
 def build_train_dataloader(dataset, config, shuffle=True):
     """Build the training dataloader described by ``config['training']``.
 
-    Uses :class:`DsBatchSampler` when ``max_batch_frames > 0`` and the dataset
+    Uses :class:`ConanBatchSampler` when ``max_batch_frames > 0`` and the dataset
     reports per-item frame counts; otherwise falls back to a fixed batch size.
 
     Args:
@@ -157,7 +140,7 @@ def build_train_dataloader(dataset, config, shuffle=True):
 
     if max_batch_frames > 0:
         if hasattr(dataset, "num_frames") and hasattr(dataset, "sizes"):
-            batch_sampler = DsBatchSampler(
+            batch_sampler = ConanBatchSampler(
                 dataset,
                 max_batch_frames=max_batch_frames,
                 max_batch_size=batch_size,
@@ -165,7 +148,7 @@ def build_train_dataloader(dataset, config, shuffle=True):
                 rank=dist.get_rank(),
                 shuffle_sample=shuffle,
                 shuffle_batch=shuffle,
-                frame_count_grid=int(train_cfg.get("sampler_frame_count_grid", 5000)),
+                frame_count_grid=int(train_cfg.get("sampler_frame_count_grid", 50)),
                 seed=int(config.get("seed", 0)),
             )
             return build_dataloader(dataset, batch_sampler, num_workers=num_workers)
@@ -207,7 +190,7 @@ def build_dataloader(dataset, batch_sampler, num_workers=4, collate_fn=None):
 
     Args:
         dataset: Paddle Dataset.
-        batch_sampler: DsBatchSampler instance.
+        batch_sampler: ConanBatchSampler instance.
         num_workers: Number of data loading workers.
         collate_fn: Batch collation function; defaults to ``dataset.collater``
             when the dataset provides one.

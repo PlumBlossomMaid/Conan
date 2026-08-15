@@ -103,10 +103,11 @@ All preprocessing and training configuration lives in YAML files under `configs/
 
 - `data.wavs_dir`: Flattened waveform directory
 - `data.hubert_onnx`: Batched HuBERT ONNX model path
-- `preprocessing.max_batch_size`: ONNX batch size for HuBERT extraction
+- `preprocessing.max_batch_size`: Maximum ONNX batch size for HuBERT extraction
+- `preprocessing.max_batch_frames`: Padded frame budget for HuBERT extraction
 - `data.n_valid` / `data.valid_seed`: Random validation sample count and split seed
 - `task_cls`: Model class to instantiate
-- `max_batch_frames`: Dynamic batching for consistent GPU memory
+- `training.max_batch_frames`: Padded-frame dynamic batching for consistent GPU memory
 
 Example configuration structure:
 
@@ -139,7 +140,7 @@ All components maintain **causal dependencies**:
 ### Distributed Training
 
 Built-in support for multi-GPU training:
-- `DsBatchSampler`: Dynamic batching by total frames
+- `ConanBatchSampler`: Dynamic batching by padded frame budget
 - Sort by similar length for efficient padding
 - Automatic gradient accumulation
 

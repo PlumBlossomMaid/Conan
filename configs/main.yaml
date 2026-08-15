@@ -58,7 +58,8 @@ training:
   log_every: 100
   val_check_interval: 10000
   num_ckpt_keep: 3
-  max_batch_frames: 0
+  max_batch_frames: 1000
+  sampler_frame_count_grid: 50
 
 data:
   data_dir: data/libritts
