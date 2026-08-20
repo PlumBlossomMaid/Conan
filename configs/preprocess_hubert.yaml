@@ -13,16 +13,14 @@ data:
   wavs_dir: data/libritts/wavs
   output_dir: data/libritts
   hubert_emb_dir: data/libritts/hubert_embeddings
-  hubert_onnx: weights/hubert_batch.onnx
+  hubert_checkpoint: weights/hubert4_paddle_aligned_20260818.pdparams
   n_valid: 150
   valid_seed: 1234
 
-# 单进程单 ONNX session，使用 ONNX batch 维度并行
+# 单进程 Paddle HuBERT，使用 batch 维度并行
 preprocessing:
   extract_archives: true
   flatten_existing: false
   max_batch_size: 8
   max_batch_frames: 8000
-  onnx_provider: auto
-  device_id: 0
-  allow_cpu_fallback: false
+  device: gpu:0

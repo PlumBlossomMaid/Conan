@@ -63,7 +63,7 @@ pip install -r requirements.txt
 # Extract and flatten LibriTTS audio
 python entry/preprocess.py -c configs/preprocess_libritts.yaml
 
-# Extract HuBERT distillation targets with one ONNX session and batched inputs
+# Extract HuBERT distillation targets with the Paddle implementation and aligned checkpoint
 python entry/preprocess.py -c configs/preprocess_hubert.yaml
 ```
 
