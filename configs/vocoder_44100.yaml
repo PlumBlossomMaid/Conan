@@ -1,0 +1,29 @@
+# Conan — 44.1 kHz F0-guided Causal NSF Shuffle Vocoder
+# Student architecture only; training and teacher distillation are not wired yet.
+
+audio:
+  sample_rate: 44100
+  n_fft: 2048
+  hop_size: 882
+  win_size: 2048
+  num_mels: 80
+  f0_min: 40.0
+  f0_max: 1100.0
+  mel_fmin: 0.0
+  mel_fmax: 22050.0
+
+vocoder:
+  type: causal_nsf_shuffle
+  upsample_rates: [9, 7, 2, 7]
+  upsample_kernel_sizes: [18, 14, 4, 14]
+  upsample_initial_channel: 512
+  resblock_type: causal_resblock1
+  resblock_kernel_sizes: [3, 7, 11]
+  resblock_dilation_sizes: [[1, 3, 5], [1, 3, 5], [1, 3, 5]]
+  harmonic_num: 8
+  sine_amp: 0.1
+  noise_std: 0.003
+  voiced_threshold: 0.0
+  use_f0: true
+  export_fixed_phase: true
+  phase_dim: 9

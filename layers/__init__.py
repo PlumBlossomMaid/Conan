@@ -5,6 +5,7 @@ from layers.cvq import ClusteringVQ
 from layers.emformer import EmformerEncoder, EmformerBlock
 from layers.stream_content_extractor import StreamContentExtractor
 from layers.hubert import HubertTeacher, hubert_frame_count
+from layers.causal_nsf_shuffle_vocoder import CausalNSFShuffleVocoder
 from layers.adaptive_style_encoder import AdaptiveStyleEncoder
 from layers.timbre_encoder import TimbreEncoder
 from layers.causal_pitch_predictor import CausalPitchPredictor
@@ -19,6 +20,7 @@ __all__ = [
     "StreamContentExtractor",
     "HubertTeacher",
     "hubert_frame_count",
+    "CausalNSFShuffleVocoder",
     "AdaptiveStyleEncoder",
     "TimbreEncoder",
     "CausalPitchPredictor",
