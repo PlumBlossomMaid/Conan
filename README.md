@@ -90,9 +90,9 @@ python entry/infer_conan.py \
   --source source.wav \
   --reference reference.wav \
   --output output.wav \
-  --content-ckpt checkpoints/content_extractor/best.pdparams \
-  --main-ckpt checkpoints/conan_main/best.pdparams \
-  --vocoder-ckpt checkpoints/vocoder/best.pdparams \
+  --content-ckpt ckpts/content_extractor/best.pdparams \
+  --main-ckpt ckpts/main_model/best.pdparams \
+  --vocoder-ckpt ckpts/vocoder/best.pdparams \
   --streaming \
   --chunk-ms 80
 ```
@@ -113,13 +113,27 @@ Example configuration structure:
 
 ```yaml
 task_cls: models.conan_main.ConanMainModel
-work_dir: checkpoints/conan_main
+work_dir: ckpts/main_model
 
 pretrained:
-  content_extractor: checkpoints/content_extractor/best.pdparams
+  content_extractor: ckpts/content_extractor/best.pdparams
   frozen_params:
     - content_extractor  # Freeze during fine-tuning
 ```
+
+### Checkpoint Layout
+
+All Conan model weights live under `ckpts/`, separated by training stage:
+
+```text
+ckpts/
+├── hubert_teacher/       # Offline HuBERT teacher used for preprocessing
+├── content_extractor/    # Stage 1 streaming content extractor
+├── vocoder/              # Stage 2 causal vocoder
+└── main_model/           # Stage 3 Conan conversion model
+```
+
+Do not create parallel `weights/` or `checkpoints/` directories. Keep exported or downloaded weights in the matching stage directory under `ckpts/`.
 
 ## Model Details
 
