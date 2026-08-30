@@ -17,6 +17,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import yaml
 
+from utils.dotdict import DotDict
+
 
 def load_config(config_path: str) -> dict:
     path = Path(config_path)
@@ -63,6 +65,7 @@ def main():
     config = load_config(args.config)
     if "preprocess_cls" not in config:
         raise ValueError(f"{args.config} must define 'preprocess_cls'")
+    DotDict(config).print_dict()
 
     preprocess_cls = get_preprocess_class(config["preprocess_cls"])
     preprocessor = preprocess_cls(config)

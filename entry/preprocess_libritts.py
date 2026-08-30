@@ -78,21 +78,12 @@ class LibriTTSPreprocessor:
         wavs_dir.mkdir(parents=True, exist_ok=True)
 
         if self.preprocessing_cfg.get("flatten_existing", False):
-            print(f"Flattening extracted audio from {archive_dir} to {wavs_dir} ...", flush=True)
             count = flatten_existing_audio(archive_dir, wavs_dir)
         else:
             tgz_files = sorted(archive_dir.glob("*.tar.gz"))
             if not tgz_files:
                 raise FileNotFoundError(f"No .tar.gz files found in {archive_dir}")
-            print(f"Extracting {len(tgz_files)} tarballs directly to {wavs_dir} ...", flush=True)
-            count = 0
-            for tgz in tgz_files:
-                n = extract_audio_flat(tgz, wavs_dir)
-                count += n
-                print(f"  {tgz.name}: {n} audio files", flush=True)
+            count = sum(extract_audio_flat(tgz, wavs_dir) for tgz in tgz_files)
 
         total_size = sum(f.stat().st_size for f in wavs_dir.iterdir() if f.is_file())
-        print(f"\n=== LibriTTS ready at {wavs_dir} ===", flush=True)
-        print(f"  {count} files, {total_size / 1024**3:.1f} GB", flush=True)
-        print("\nNext step:", flush=True)
-        print("  python entry/preprocess.py -c configs/preprocess_hubert.yaml", flush=True)
+        return count, total_size

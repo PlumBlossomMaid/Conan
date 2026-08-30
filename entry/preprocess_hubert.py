@@ -196,15 +196,6 @@ class HubertPreprocessor:
         max_batch_frames = int(self.preprocessing_cfg.get("max_batch_frames", 0))
         max_attention_tokens = int(self.preprocessing_cfg.get("max_attention_tokens", 0))
 
-        print(f"Audio files: {len(files)}", flush=True)
-        print(f"Preprocess splits: train={len(train_files)}, valid={len(valid_files)}", flush=True)
-        print(f"Validation seed: {valid_seed}", flush=True)
-        print(f"HuBERT checkpoint: {checkpoint_path}", flush=True)
-        print(f"Paddle device: {paddle.get_device()}", flush=True)
-        print(f"Max batch size: {max_batch_size}", flush=True)
-        print(f"Max batch frames: {max_batch_frames if max_batch_frames > 0 else 'disabled'}", flush=True)
-        print(f"Max attention tokens: {max_attention_tokens if max_attention_tokens > 0 else 'disabled'}", flush=True)
-
         t0 = time.time()
         ok_train = self._write_split(train_h5, train_files, model, "preprocess-train")
         ok_valid = self._write_split(valid_h5, valid_files, model, "preprocess-valid")

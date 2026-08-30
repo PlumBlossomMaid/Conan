@@ -26,6 +26,7 @@ from ocean.callbacks import ModelCheckpoint
 from callbacks.file_metrics import FileMetricsCallback
 from callbacks.speed_monitor import SpeedMonitor
 from callbacks.progress_bar import ConanProgressBar
+from utils.dotdict import DotDict
 from utils.logger import get_logger
 from utils.model_utils import freeze_params, print_model_summary
 
@@ -102,6 +103,7 @@ def main():
     config = load_config(args.config)
     if "task_cls" not in config:
         raise ValueError(f"{args.config} must define 'task_cls'")
+    DotDict(config).print_dict()
 
     train_cfg = config.get("training", {})
     work_dir = PROJECT_ROOT / config.get("work_dir", "ckpts")
