@@ -13,7 +13,7 @@ data:
   wavs_dir: data/libritts/wavs
   output_dir: data/libritts
   hubert_emb_dir: data/libritts/hubert_embeddings
-  hubert_onnx: weights/hubert_batch.onnx
+  hubert_onnx: ckpts/hubert_teacher/hubert_batch.onnx
   sample_rate: 16000
   n_valid: 150  # validation 样本数
   valid_seed: 1234

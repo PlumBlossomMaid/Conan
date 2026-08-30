@@ -104,7 +104,7 @@ def main():
         raise ValueError(f"{args.config} must define 'task_cls'")
 
     train_cfg = config.get("training", {})
-    work_dir = PROJECT_ROOT / config.get("work_dir", "checkpoints")
+    work_dir = PROJECT_ROOT / config.get("work_dir", "ckpts")
     log_dir = Path(config.get("log_dir", work_dir / "logs"))
     ckpt_dir = Path(config.get("ckpt_dir", work_dir / "ckpt"))
     log_dir.mkdir(parents=True, exist_ok=True)

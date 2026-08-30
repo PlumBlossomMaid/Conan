@@ -150,7 +150,12 @@ class HubertPreprocessor:
     def run(self):
         wavs_dir = _resolve_path(self.data_cfg.get("wavs_dir", "data/libritts/wavs"))
         output_dir = _resolve_path(self.data_cfg.get("hubert_emb_dir", "data/libritts/hubert_embeddings"))
-        checkpoint_path = _resolve_path(self.data_cfg.get("hubert_checkpoint", "weights/hubert.pdparams"))
+        checkpoint_path = _resolve_path(
+            self.data_cfg.get(
+                "hubert_checkpoint",
+                "ckpts/hubert_teacher/hubert4_paddle_aligned_20260818.pdparams",
+            )
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
 
         if not wavs_dir.exists():

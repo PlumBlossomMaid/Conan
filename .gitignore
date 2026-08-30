@@ -48,6 +48,12 @@ env/
 
 # PaddlePaddle
 checkpoints/
+weights/
+ckpts/
+!ckpts/
+!ckpts/.gitkeep
+!ckpts/*/
+!ckpts/*/.gitkeep
 logs/
 tensorboard/
 *.pdparams

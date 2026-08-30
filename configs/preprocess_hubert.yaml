@@ -13,7 +13,7 @@ data:
   wavs_dir: data/libritts/wavs
   output_dir: data/libritts
   hubert_emb_dir: data/libritts/hubert_embeddings
-  hubert_checkpoint: weights/hubert4_paddle_aligned_20260818.pdparams
+  hubert_checkpoint: ckpts/hubert_teacher/hubert4_paddle_aligned_20260818.pdparams
   n_valid: 150
   valid_seed: 1234
 
