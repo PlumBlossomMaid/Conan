@@ -246,6 +246,7 @@ class ConanMainModel(Model):
     def _generator_loss(
         self, mel_pred: paddle.Tensor, mel_gt: paddle.Tensor,
         f0_pred: paddle.Tensor, f0_gt: paddle.Tensor,
+        valid_mask: Optional[paddle.Tensor] = None,
     ) -> dict:
         """Compute generator losses.
 
@@ -267,10 +268,18 @@ class ConanMainModel(Model):
             mel_pred = F.pad(mel_pred, [0, T_gt - T_pred])
 
         # MAE loss
-        loss_mae = F.l1_loss(mel_pred, mel_gt) * self.lambda_mae
+        if valid_mask is None:
+            loss_mae = F.l1_loss(mel_pred, mel_gt) * self.lambda_mae
+        else:
+            mask = valid_mask.unsqueeze(1)
+            loss_mae = (
+                (paddle.abs(mel_pred - mel_gt) * mask).sum()
+                / (mask.sum() * mel_pred.shape[1]).clip(min=1.0)
+                * self.lambda_mae
+            )
 
         # SSIM loss
-        loss_ssim = self.ssim_loss(mel_pred, mel_gt) * self.lambda_ssim
+        loss_ssim = self.ssim_loss(mel_pred, mel_gt, valid_mask) * self.lambda_ssim
 
         # Adversarial loss (generator)
         # mel_pred: (B, n_mels, T) → (B, 1, n_mels, T)
@@ -289,7 +298,13 @@ class ConanMainModel(Model):
                 f0_pred = f0_pred[:, :T_f0, :]
             elif T_pred_f0 < T_f0:
                 f0_pred = F.pad(f0_pred, [0, 0, 0, T_f0 - T_pred_f0])
-            loss_pitch = F.mse_loss(f0_pred, f0_gt) * self.lambda_pitch
+            if valid_mask is None:
+                loss_pitch = F.mse_loss(f0_pred, f0_gt) * self.lambda_pitch
+            else:
+                pitch_mask = valid_mask[:, :T_f0].unsqueeze(-1)
+                loss_pitch = (
+                    ((f0_pred - f0_gt) ** 2) * pitch_mask
+                ).sum() / pitch_mask.sum().clip(min=1.0) * self.lambda_pitch
         else:
             loss_pitch = paddle.to_tensor(0.0)
 
@@ -347,7 +362,8 @@ class ConanMainModel(Model):
         mel_gt = batch["source_mel"]
 
         # ── Generator backward (accumulate grad) ──
-        g_losses = self._generator_loss(mel_pred, mel_gt, out["f0_pred"], f0_gt)
+        valid_mask = batch.get("source_valid_mask")
+        g_losses = self._generator_loss(mel_pred, mel_gt, out["f0_pred"], f0_gt, valid_mask)
         g_losses["loss_g"].backward()
 
         # ── Discriminator backward (accumulate grad) ──
@@ -388,7 +404,9 @@ class ConanMainModel(Model):
             mel_pred = out["mel_pred"]
             mel_gt = source_mel
 
-            g_losses = self._generator_loss(mel_pred, mel_gt, out["f0_pred"], f0_gt)
+            g_losses = self._generator_loss(
+                mel_pred, mel_gt, out["f0_pred"], f0_gt, batch.get("source_valid_mask")
+            )
             loss_d = self._discriminator_loss(mel_pred, mel_gt)
 
             self.log("val/loss", g_losses["loss_g"].item())

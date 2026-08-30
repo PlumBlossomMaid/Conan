@@ -249,11 +249,14 @@ class HubertPreprocessor:
                 samples = _load_batch(batch_files, self.audio_cfg)
                 emb = _run_hubert_batch(model, samples)
                 for i, sample in enumerate(samples):
-                    n_frames = min(sample["n_frames"] + 1, emb[i].shape[0])
+                    n_frames = min(sample["n_frames"] + 1, emb[i].shape[0], sample["mel"].shape[-1])
                     grp = h5f.create_group(f"{ok:08d}")
-                    grp.create_dataset("mel", data=sample["mel"], compression="gzip")
+                    grp.create_dataset("mel", data=sample["mel"][:, :n_frames], compression="gzip")
                     grp.create_dataset("hubert", data=emb[i][:n_frames].astype(np.float32), compression="gzip")
                     grp.attrs["source_path"] = str(sample["path"].relative_to(PROJECT_ROOT))
+                    grp.attrs["mel_frames"] = n_frames
+                    grp.attrs["hubert_frames"] = n_frames
+                    grp.attrs["audio_samples"] = len(sample["audio"])
                     ok += 1
 
                 pbar.update(len(batch_files))

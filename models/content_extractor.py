@@ -83,7 +83,9 @@ class ContentExtractorModel(Model):
             content_emb = content_emb[:, :T_target, :]
         elif T_pred < T_target:
             content_emb = F.pad(content_emb, [0, 0, 0, T_target - T_pred])
-        loss = F.mse_loss(content_emb, hubert_emb)
+        valid_mask = batch["valid_mask"].unsqueeze(-1)
+        squared_error = ((content_emb - hubert_emb) ** 2) * valid_mask
+        loss = squared_error.sum() / paddle.clip(valid_mask.sum() * content_emb.shape[-1], min=1.0)
 
         # Progress bar only (DiffSinger: logger=False for tqdm)
         self.log("train/loss", loss.item(), prog_bar=True, logger=False, on_step=True, on_epoch=False)
@@ -126,11 +128,14 @@ class ContentExtractorModel(Model):
             content_emb = content_emb[:, :T_target, :]
         elif T_pred < T_target:
             content_emb = F.pad(content_emb, [0, 0, 0, T_target - T_pred])
-        loss = F.mse_loss(content_emb, hubert_emb)
+        valid_mask = batch["valid_mask"].unsqueeze(-1)
+        squared_error = ((content_emb - hubert_emb) ** 2) * valid_mask
+        loss = squared_error.sum() / paddle.clip(valid_mask.sum() * content_emb.shape[-1], min=1.0)
         B, T, D = content_emb.shape
+        valid_flat = valid_mask.squeeze(-1).reshape([-1]) > 0
         sim = F.cosine_similarity(
-            content_emb.reshape([-1, D]),
-            hubert_emb.reshape([-1, D]),
+            content_emb.reshape([-1, D])[valid_flat],
+            hubert_emb.reshape([-1, D])[valid_flat],
             axis=-1,
         ).mean()
 

@@ -315,6 +315,8 @@ class ConanDataset(Dataset):
             "ref_mel": ref_mel,
             "f0": f0,
             "hubert_emb": hubert_emb,
+            "source_length": mel_len,
+            "ref_length": ref_mel.shape[-1],
             "source_path": self.source_files[idx],
         }
 
@@ -393,6 +395,9 @@ class ConanDataset(Dataset):
                 padded_embs.append(emb)
 
         lengths = np.array([m.shape[-1] for m in source_mels], dtype=np.int64)
+        ref_lengths = np.array([m.shape[-1] for m in ref_mels], dtype=np.int64)
+        source_valid_mask = (np.arange(max_mel_len)[None, :] < lengths[:, None]).astype(np.float32)
+        ref_valid_mask = (np.arange(max_ref_len)[None, :] < ref_lengths[:, None]).astype(np.float32)
 
         batch = {
             "source_audio": paddle.to_tensor(np.stack(padded_audios, axis=0), dtype=paddle.float32),
@@ -400,6 +405,9 @@ class ConanDataset(Dataset):
             "ref_mel": paddle.to_tensor(np.stack(padded_ref_mels, axis=0), dtype=paddle.float32),
             "f0": paddle.to_tensor(np.stack(padded_f0s, axis=0), dtype=paddle.float32).unsqueeze(-1),
             "lengths": paddle.to_tensor(lengths),
+            "ref_lengths": paddle.to_tensor(ref_lengths),
+            "source_valid_mask": paddle.to_tensor(source_valid_mask),
+            "ref_valid_mask": paddle.to_tensor(ref_valid_mask),
         }
         if has_hubert:
             batch["hubert_emb"] = paddle.to_tensor(np.stack(padded_embs, axis=0), dtype=paddle.float32)
@@ -438,14 +446,8 @@ class ContentExtractorDataset(Dataset):
         return len(self.keys)
 
     def num_frames(self, idx: int) -> int:
-        """Frames this item costs in a batch.
-
-        ``__getitem__`` crops or pads every item to ``max_frames``, so the cost
-        is constant regardless of the source length. A frame budget therefore
-        derives the batch size from ``max_frames`` rather than varying it per
-        batch; ``sizes`` still reflects true source lengths for sorting.
-        """
-        return self.max_frames
+        """Return the padded-frame budget for this item."""
+        return min(self.sizes[idx], self.max_frames)
 
     def __getitem__(self, idx):
         if self._h5f is None:
@@ -454,22 +456,28 @@ class ContentExtractorDataset(Dataset):
         mel = self._h5f[key]["mel"][()]          # (80, T)
         hubert_emb = self._h5f[key]["hubert"][()]  # (T, 256)
 
+        valid_frames = min(mel.shape[-1], len(hubert_emb))
+        if valid_frames <= 0:
+            raise ValueError(f"{key} has no aligned mel and HuBERT frames")
+        mel = mel[:, :valid_frames]
+        hubert_emb = hubert_emb[:valid_frames]
+
         # ── Random window crop ──
-        T = mel.shape[-1]
+        T = valid_frames
         if T > self.max_frames:
             start = random.randint(0, T - self.max_frames)
             mel = mel[:, start:start + self.max_frames]
-            h_start = min(start, len(hubert_emb) - 1) if start < len(hubert_emb) else 0
-            h_end = min(h_start + self.max_frames, len(hubert_emb))
-            hubert_emb = hubert_emb[h_start:h_end]
-        elif T < self.max_frames:
+            hubert_emb = hubert_emb[start:start + self.max_frames]
+            valid_frames = self.max_frames
+        else:
             pad = self.max_frames - T
-            mel = np.pad(mel, [(0, 0), (0, pad)], mode="constant", constant_values=-11.5)
-            h_pad = self.max_frames - len(hubert_emb)
-            if h_pad > 0:
-                hubert_emb = np.pad(hubert_emb, [(0, h_pad), (0, 0)], mode="constant")
+            if pad > 0:
+                mel = np.pad(mel, [(0, 0), (0, pad)], mode="constant", constant_values=-11.5)
+                hubert_emb = np.pad(hubert_emb, [(0, pad), (0, 0)], mode="constant")
 
-        return {"mel": mel, "hubert_emb": hubert_emb}
+        valid_mask = np.zeros(self.max_frames, dtype=np.float32)
+        valid_mask[:valid_frames] = 1.0
+        return {"mel": mel, "hubert_emb": hubert_emb, "valid_mask": valid_mask, "length": valid_frames}
 
     def collater(self, samples):
         mels = np.stack([s["mel"] for s in samples], axis=0).astype(np.float32)
@@ -491,4 +499,6 @@ class ContentExtractorDataset(Dataset):
         return {
             "source_mel": mels,
             "hubert_emb": np.stack(embs, axis=0).astype(np.float32),
+            "valid_mask": np.stack([s["valid_mask"] for s in samples], axis=0).astype(np.float32),
+            "lengths": np.asarray([s["length"] for s in samples], dtype=np.int64),
         }

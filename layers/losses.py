@@ -24,22 +24,16 @@ class SSIMMelLoss(nn.Layer):
         super().__init__()
         self.window_size = window_size
 
-    def forward(self, pred: paddle.Tensor, target: paddle.Tensor) -> paddle.Tensor:
-        """Compute SSIM loss.
-
-        Args:
-            pred: (B, n_mels, T) predicted mel.
-            target: (B, n_mels, T) ground truth mel.
-
-        Returns:
-            Scalar loss.
-        """
-        # Add channel dim if needed
+    def forward(self, pred: paddle.Tensor, target: paddle.Tensor, valid_mask: paddle.Tensor | None = None) -> paddle.Tensor:
+        """Compute SSIM loss for valid time frames only."""
         if pred.dim() == 3:
-            pred = pred.unsqueeze(1)  # (B, 1, n_mels, T)
+            pred = pred.unsqueeze(1)
             target = target.unsqueeze(1)
-
-        return 1.0 - self._ssim(pred, target)
+        score = self._ssim(pred, target).mean(axis=1).mean(axis=1)
+        if valid_mask is None:
+            return 1.0 - score.mean()
+        mask = valid_mask
+        return 1.0 - (score * mask).sum() / mask.sum().clip(min=1.0)
 
     def _ssim(self, x: paddle.Tensor, y: paddle.Tensor) -> paddle.Tensor:
         """Compute SSIM between two images/tensors.
@@ -87,9 +81,10 @@ class FeatureMatchingLoss(nn.Layer):
         """
         loss = 0.0
         n_layers = 0
-        for fake_f, real_f in zip(fake_feats, real_feats):
-            loss = loss + F.l1_loss(fake_f, real_f.detach())
-            n_layers += 1
+        for fake_scale, real_scale in zip(fake_feats, real_feats):
+            for fake_f, real_f in zip(fake_scale, real_scale):
+                loss = loss + F.l1_loss(fake_f, real_f.detach())
+                n_layers += 1
         return loss / max(n_layers, 1)
 
 
