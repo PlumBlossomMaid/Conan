@@ -27,7 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from layers.batching import batch_by_files
-from layers.hubert import HubertTeacher
+from layers.hubert import HubertTeacher, hubert_frame_count
 
 AUDIO_SUFFIXES = {".wav", ".flac"}
 
@@ -46,22 +46,16 @@ def _batches(
     files: list[Path],
     max_batch_size: int,
     max_batch_frames: int,
+    max_attention_tokens: int,
     sample_rate: int,
     hop_size: int,
 ) -> list[list[Path]]:
-    if max_batch_frames <= 0:
-        return batch_by_files(
-            files,
-            lambda path: 1,
-            max_batch_frames=0,
-            max_batch_size=max_batch_size,
-            sort_by_len=False,
-        )
     return batch_by_files(
         files,
         lambda path: _estimate_mel_frames(path, sample_rate, hop_size),
         max_batch_frames=max_batch_frames,
         max_batch_size=max_batch_size,
+        max_attention_tokens=max_attention_tokens,
         sort_by_len=True,
         grid=1,
     )
@@ -76,9 +70,7 @@ def _estimate_mel_frames(path: Path, sample_rate: int, hop_size: int) -> int:
 
 
 def _hubert_frames(n_samples: int) -> int:
-    if n_samples < 400:
-        return 0
-    return (n_samples - 640) // 320 + 1
+    return hubert_frame_count(n_samples)
 
 
 def _load_audio(path: Path, sample_rate: int) -> np.ndarray:
@@ -131,12 +123,21 @@ def _load_batch(batch_files: list[Path], audio_cfg: dict):
 
 
 def _run_hubert_batch(model: HubertTeacher, samples: list[dict]) -> list[np.ndarray]:
-    embeddings = []
     with paddle.no_grad():
-        for sample in samples:
-            source = paddle.to_tensor(sample["audio"].reshape([1, 1, -1]))
-            embeddings.append(model(source).numpy()[0])
-    return embeddings
+        feature_list = [
+            model.feature_extractor(
+                paddle.to_tensor(sample["audio"].reshape([1, 1, -1]))
+            ).transpose([0, 2, 1])[0]
+            for sample in samples
+        ]
+        max_frames = max(feature.shape[0] for feature in feature_list)
+        features = paddle.zeros([len(samples), max_frames, feature_list[0].shape[1]])
+        padding_mask = paddle.ones([len(samples), max_frames], dtype="bool")
+        for index, feature in enumerate(feature_list):
+            features[index, :feature.shape[0], :] = feature
+            padding_mask[index, :feature.shape[0]] = False
+        outputs = model.encode_features(features, padding_mask=padding_mask).numpy()
+    return [outputs[i, :feature.shape[0], :] for i, feature in enumerate(feature_list)]
 
 
 class HubertPreprocessor:
@@ -188,6 +189,7 @@ class HubertPreprocessor:
 
         max_batch_size = int(self.preprocessing_cfg.get("max_batch_size", 8))
         max_batch_frames = int(self.preprocessing_cfg.get("max_batch_frames", 0))
+        max_attention_tokens = int(self.preprocessing_cfg.get("max_attention_tokens", 0))
 
         print(f"Audio files: {len(files)}", flush=True)
         print(f"Preprocess splits: train={len(train_files)}, valid={len(valid_files)}", flush=True)
@@ -196,6 +198,7 @@ class HubertPreprocessor:
         print(f"Paddle device: {paddle.get_device()}", flush=True)
         print(f"Max batch size: {max_batch_size}", flush=True)
         print(f"Max batch frames: {max_batch_frames if max_batch_frames > 0 else 'disabled'}", flush=True)
+        print(f"Max attention tokens: {max_attention_tokens if max_attention_tokens > 0 else 'disabled'}", flush=True)
 
         t0 = time.time()
         ok_train = self._write_split(train_h5, train_files, model, "preprocess-train")
@@ -210,6 +213,7 @@ class HubertPreprocessor:
             "paddle_device": paddle.get_device(),
             "max_batch_size": max_batch_size,
             "max_batch_frames": max_batch_frames,
+            "max_attention_tokens": max_attention_tokens,
             "n_valid": n_valid,
             "valid_seed": valid_seed,
             "split": "random",
@@ -228,9 +232,17 @@ class HubertPreprocessor:
     ) -> int:
         batch_size = int(self.preprocessing_cfg.get("max_batch_size", 8))
         max_batch_frames = int(self.preprocessing_cfg.get("max_batch_frames", 0))
+        max_attention_tokens = int(self.preprocessing_cfg.get("max_attention_tokens", 0))
         sample_rate = int(self.audio_cfg.get("sample_rate", 16000))
         hop_size = int(self.audio_cfg.get("hop_size", 320))
-        batches = _batches(files, batch_size, max_batch_frames, sample_rate, hop_size)
+        batches = _batches(
+            files,
+            batch_size,
+            max_batch_frames,
+            max_attention_tokens,
+            sample_rate,
+            hop_size,
+        )
 
         ok = 0
         with h5py.File(h5_path, "w") as h5f:
