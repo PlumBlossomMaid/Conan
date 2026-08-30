@@ -47,7 +47,9 @@ class HubertSelfAttention(nn.Layer):
         self.q_proj = nn.Linear(embed_dim, embed_dim)
         self.out_proj = nn.Linear(embed_dim, embed_dim)
 
-    def forward(self, x: paddle.Tensor) -> paddle.Tensor:
+    def forward(
+        self, x: paddle.Tensor, padding_mask: paddle.Tensor | None = None
+    ) -> paddle.Tensor:
         batch_size, length, _ = x.shape
         q = self.q_proj(x) * self.scaling
         k = self.k_proj(x)
@@ -55,9 +57,19 @@ class HubertSelfAttention(nn.Layer):
         q = q.reshape([batch_size, length, self.num_heads, self.head_dim]).transpose([0, 2, 1, 3])
         k = k.reshape([batch_size, length, self.num_heads, self.head_dim]).transpose([0, 2, 1, 3])
         v = v.reshape([batch_size, length, self.num_heads, self.head_dim]).transpose([0, 2, 1, 3])
-        weights = F.softmax(paddle.matmul(q, k, transpose_y=True), axis=-1)
+        scores = paddle.matmul(q, k, transpose_y=True)
+        if padding_mask is not None:
+            scores = paddle.where(
+                padding_mask.unsqueeze(1).unsqueeze(1),
+                paddle.full_like(scores, -1e9),
+                scores,
+            )
+        weights = F.softmax(scores, axis=-1)
         values = paddle.matmul(weights, v).transpose([0, 2, 1, 3])
-        return self.out_proj(values.reshape([batch_size, length, self.embed_dim]))
+        output = self.out_proj(values.reshape([batch_size, length, self.embed_dim]))
+        if padding_mask is not None:
+            output = paddle.where(padding_mask.unsqueeze(-1), paddle.zeros_like(output), output)
+        return output
 
 
 class HubertEncoderLayer(nn.Layer):
@@ -69,9 +81,15 @@ class HubertEncoderLayer(nn.Layer):
         self.fc2 = nn.Linear(ffn_dim, embed_dim)
         self.final_layer_norm = nn.LayerNorm(embed_dim)
 
-    def forward(self, x: paddle.Tensor) -> paddle.Tensor:
-        x = self.self_attn_layer_norm(x + self.self_attn(x))
+    def forward(
+        self, x: paddle.Tensor, padding_mask: paddle.Tensor | None = None
+    ) -> paddle.Tensor:
+        x = self.self_attn_layer_norm(x + self.self_attn(x, padding_mask))
+        if padding_mask is not None:
+            x = paddle.where(padding_mask.unsqueeze(-1), paddle.zeros_like(x), x)
         x = self.final_layer_norm(x + self.fc2(F.gelu(self.fc1(x))))
+        if padding_mask is not None:
+            x = paddle.where(padding_mask.unsqueeze(-1), paddle.zeros_like(x), x)
         return x
 
 
@@ -97,10 +115,26 @@ class HubertEncoder(nn.Layer):
         self.layer_norm = nn.LayerNorm(768)
         self.layers = nn.LayerList([HubertEncoderLayer() for _ in range(num_layers)])
 
-    def forward(self, x: paddle.Tensor) -> paddle.Tensor:
-        x = self.layer_norm(x + self.pos_conv(x))
+    def forward(
+        self, x: paddle.Tensor, padding_mask: paddle.Tensor | None = None
+    ) -> paddle.Tensor:
+        if padding_mask is None:
+            x = self.layer_norm(x + self.pos_conv(x))
+        else:
+            lengths = (~padding_mask).astype("int64").sum(axis=-1).numpy().tolist()
+            features = x
+            positioned = []
+            for index, length in enumerate(lengths):
+                value = self.pos_conv(features[index:index + 1, :int(length), :])
+                positioned.append(value)
+            x = paddle.zeros_like(features)
+            for index, value in enumerate(positioned):
+                x[index, :value.shape[1], :] = self.layer_norm(
+                    features[index, :value.shape[1], :] + value[0]
+                )
+            x = paddle.where(padding_mask.unsqueeze(-1), paddle.zeros_like(x), x)
         for layer in self.layers:
-            x = layer(x)
+            x = layer(x, padding_mask)
         return x
 
 
@@ -113,12 +147,20 @@ class HubertTeacher(nn.Layer):
         self.encoder = HubertEncoder(num_layers=9)
         self.final_proj = nn.Linear(768, 256)
 
-    def forward(self, source: paddle.Tensor) -> paddle.Tensor:
-        features = self.feature_extractor(source).transpose([0, 2, 1])
+    def encode_features(
+        self, features: paddle.Tensor, padding_mask: paddle.Tensor | None = None
+    ) -> paddle.Tensor:
         features = self.layer_norm(features)
         features = self.post_extract_proj(features)
-        features = self.encoder(features)
-        return self.final_proj(features)
+        features = self.encoder(features, padding_mask)
+        output = self.final_proj(features)
+        if padding_mask is not None:
+            output = paddle.where(padding_mask.unsqueeze(-1), paddle.zeros_like(output), output)
+        return output
+
+    def forward(self, source: paddle.Tensor) -> paddle.Tensor:
+        features = self.feature_extractor(source).transpose([0, 2, 1])
+        return self.encode_features(features)
 
     def load_pretrained(self, path: str | Path) -> None:
         state_dict = paddle.load(str(path))
@@ -130,4 +172,4 @@ class HubertTeacher(nn.Layer):
 def hubert_frame_count(n_samples: int) -> int:
     if n_samples < 400:
         return 0
-    return (n_samples - 640) // 320 + 1
+    return (n_samples - 400) // 320 + 1
