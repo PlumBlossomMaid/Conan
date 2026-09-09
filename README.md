@@ -60,8 +60,8 @@ pip install -r requirements.txt
 ### 1. Data Preparation
 
 ```bash
-# Extract and flatten LibriTTS audio
-python entry/preprocess.py -c configs/preprocess_libritts.yaml
+# Prepare audio with your dataset tool (for example, Ocean), then point Conan at the prepared directory.
+# Conan does not download, extract, or flatten archives.
 
 # Extract HuBERT distillation targets with the Paddle implementation and aligned checkpoint
 python entry/preprocess.py -c configs/preprocess_hubert.yaml

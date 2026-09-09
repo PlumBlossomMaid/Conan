@@ -9,7 +9,6 @@ preprocess_cls: entry.preprocess_hubert.HubertPreprocessor
 
 # 数据路径
 data:
-  archive_dir: data
   wavs_dir: data/libritts/wavs
   output_dir: data/libritts
   hubert_emb_dir: data/libritts/hubert_embeddings
