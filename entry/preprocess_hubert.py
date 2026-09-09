@@ -8,6 +8,7 @@ Usage:
     python entry/preprocess.py -c configs/preprocess_hubert.yaml
 """
 
+import gc
 import json
 import random
 import sys
@@ -122,6 +123,17 @@ def _load_batch(batch_files: list[Path], audio_cfg: dict):
     return samples
 
 
+def _memory_status() -> str:
+    rss_mb = int(Path("/proc/self/status").read_text().split("VmRSS:")[1].split()[0]) / 1024
+    current = Path("/sys/fs/cgroup/memory.current")
+    limit = Path("/sys/fs/cgroup/memory.max")
+    if current.exists() and limit.exists():
+        limit_text = limit.read_text().strip()
+        limit_mb = limit_text if limit_text == "max" else f"{int(limit_text) / 1024**2:.0f}MB"
+        return f"rss={rss_mb:.0f}MB cgroup={int(current.read_text()) / 1024**2:.0f}MB/{limit_mb}"
+    return f"rss={rss_mb:.0f}MB"
+
+
 def _run_hubert_batch(model: HubertTeacher, samples: list[dict]) -> list[np.ndarray]:
     with paddle.no_grad():
         feature_list = [
@@ -137,7 +149,28 @@ def _run_hubert_batch(model: HubertTeacher, samples: list[dict]) -> list[np.ndar
             features[index, :feature.shape[0], :] = feature
             padding_mask[index, :feature.shape[0]] = False
         outputs = model.encode_features(features, padding_mask=padding_mask).numpy()
-    return [outputs[i, :feature.shape[0], :] for i, feature in enumerate(feature_list)]
+    result = [outputs[i, :feature.shape[0], :].copy() for i, feature in enumerate(feature_list)]
+    del feature_list, features, padding_mask, outputs
+    return result
+
+
+def _is_memory_error(error: RuntimeError) -> bool:
+    message = str(error).lower()
+    return any(token in message for token in ("out of memory", "out_of_memory", "oom", "hip error"))
+
+
+def _run_hubert_batch_resilient(model: HubertTeacher, samples: list[dict]) -> list[np.ndarray]:
+    try:
+        return _run_hubert_batch(model, samples)
+    except Exception as error:
+        if not _is_memory_error(error) or len(samples) == 1:
+            raise
+        midpoint = len(samples) // 2
+        del error
+        gc.collect()
+        return _run_hubert_batch_resilient(model, samples[:midpoint]) + _run_hubert_batch_resilient(
+            model, samples[midpoint:]
+        )
 
 
 class HubertPreprocessor:
@@ -169,9 +202,6 @@ class HubertPreprocessor:
 
         train_h5 = output_dir / "train.h5"
         valid_h5 = output_dir / "valid.h5"
-        for h5_path in (train_h5, valid_h5):
-            if h5_path.exists():
-                raise FileExistsError(f"{h5_path} exists. Delete it manually before re-running.")
 
         n_valid = min(int(self.data_cfg.get("n_valid", 150)), len(files) // 10)
         valid_seed = int(self.data_cfg.get("valid_seed", 1234))
@@ -239,9 +269,11 @@ class HubertPreprocessor:
             sample_rate,
             hop_size,
         )
+        ordered_files = [path for batch in batches for path in batch]
 
         ok = 0
-        with h5py.File(h5_path, "w") as h5f:
+        mode = "a" if h5_path.exists() else "w"
+        with h5py.File(h5_path, mode) as h5f:
             for key, value in {
                 "sample_rate": int(self.audio_cfg.get("sample_rate", 16000)),
                 "n_mels": int(self.audio_cfg.get("num_mels", 80)),
@@ -251,11 +283,23 @@ class HubertPreprocessor:
             }.items():
                 h5f.attrs[key] = value
 
-            pbar = tqdm(total=len(files), desc=split_name, unit="files", dynamic_ncols=True)
+            ok = len(h5f)
+            if ok > len(ordered_files):
+                raise RuntimeError(f"{h5_path} contains {ok} samples but input has only {len(ordered_files)} files")
+            remaining_files = ordered_files[ok:]
+            batches = _batches(
+                remaining_files,
+                batch_size,
+                max_batch_frames,
+                max_attention_tokens,
+                sample_rate,
+                hop_size,
+            )
+            pbar = tqdm(total=len(ordered_files), initial=ok, desc=split_name, unit="files", dynamic_ncols=True)
             start_time = time.time()
             for batch_files in batches:
                 samples = _load_batch(batch_files, self.audio_cfg)
-                emb = _run_hubert_batch(model, samples)
+                emb = _run_hubert_batch_resilient(model, samples)
                 for i, sample in enumerate(samples):
                     n_frames = min(sample["n_frames"] + 1, emb[i].shape[0], sample["mel"].shape[-1])
                     grp = h5f.create_group(f"{ok:08d}")
@@ -266,11 +310,13 @@ class HubertPreprocessor:
                     grp.attrs["hubert_frames"] = n_frames
                     grp.attrs["audio_samples"] = len(sample["audio"])
                     ok += 1
-
+                h5f.flush()
                 pbar.update(len(batch_files))
                 elapsed = time.time() - start_time
                 if elapsed > 0:
-                    pbar.set_postfix(speed=f"{ok / elapsed:.1f}/s")
+                    pbar.set_postfix(speed=f"{(ok - pbar.initial) / elapsed:.1f}/s", memory=_memory_status())
+                del samples, emb
+                gc.collect()
             pbar.close()
 
         return ok

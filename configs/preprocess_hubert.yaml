@@ -16,10 +16,8 @@ data:
   n_valid: 150
   valid_seed: 1234
 
-# 单进程 Paddle HuBERT，使用 batch 维度并行
+# 单进程 Paddle HuBERT，使用动态帧预算并在显存不足时递归缩小批次
 preprocessing:
-  extract_archives: true
-  flatten_existing: false
   max_batch_size: 8
   max_batch_frames: 12000
   max_attention_tokens: 12000000
