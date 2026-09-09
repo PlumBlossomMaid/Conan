@@ -145,17 +145,33 @@ def _completed_groups(h5f: h5py.File) -> int:
     return count
 
 
+def _read_int(path: Path) -> int | None:
+    try:
+        value = path.read_text().strip()
+        return None if value == "max" else int(value)
+    except (OSError, ValueError):
+        return None
+
+
 def _memory_status() -> str:
+    rss_mb = 0
     status = Path("/proc/self/status")
     if status.exists():
-        rss_mb = int(status.read_text().split("VmRSS:")[1].split()[0]) / 1024
-    else:
-        rss_mb = 0
+        for line in status.read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                parts = line.split()
+                if len(parts) >= 2:
+                    try:
+                        rss_mb = int(parts[1]) / 1024
+                    except ValueError:
+                        pass
+                break
     paths = _cgroup_memory_paths()
     if paths is not None:
-        limit_text = paths[1].read_text().strip()
-        if limit_text not in {"max"} and int(limit_text) < 2**60:
-            return f"rss={rss_mb:.0f}MB cgroup={int(paths[0].read_text()) / 1024**2:.0f}MB/{int(limit_text) / 1024**2:.0f}MB"
+        current = _read_int(paths[0])
+        limit = _read_int(paths[1])
+        if current is not None and limit is not None and limit < 2**60:
+            return f"rss={rss_mb:.0f}MB cgroup={current / 1024**2:.0f}MB/{limit / 1024**2:.0f}MB"
     return f"rss={rss_mb:.0f}MB"
 
 
@@ -174,8 +190,8 @@ def _memory_limit_bytes() -> int | None:
     paths = _cgroup_memory_paths()
     if paths is None:
         return None
-    value = paths[1].read_text().strip()
-    return None if value == "max" or int(value) >= 2**60 else int(value)
+    value = _read_int(paths[1])
+    return None if value is None or value >= 2**60 else value
 
 
 def _memory_ratio() -> float | None:
@@ -183,7 +199,10 @@ def _memory_ratio() -> float | None:
     limit_bytes = _memory_limit_bytes()
     if paths is None or limit_bytes is None:
         return None
-    return int(paths[0].read_text()) / limit_bytes
+    current_bytes = _read_int(paths[0])
+    if current_bytes is None:
+        return None
+    return current_bytes / limit_bytes
 
 
 def _memory_budget_ratio(config: dict) -> float:
@@ -231,6 +250,11 @@ def _is_memory_error(error: RuntimeError) -> bool:
     return any(token in message for token in ("out of memory", "out_of_memory", "oom", "hip error"))
 
 
+def _clear_paddle_cache() -> None:
+    if paddle.get_device().startswith("gpu"):
+        paddle.device.cuda.empty_cache()
+
+
 def _run_hubert_batch_resilient(model: HubertTeacher, samples: list[dict]) -> list[np.ndarray]:
     try:
         return _run_hubert_batch(model, samples)
@@ -240,6 +264,7 @@ def _run_hubert_batch_resilient(model: HubertTeacher, samples: list[dict]) -> li
         midpoint = len(samples) // 2
         del error
         gc.collect()
+        _clear_paddle_cache()
         return _run_hubert_batch_resilient(model, samples[:midpoint]) + _run_hubert_batch_resilient(
             model, samples[midpoint:]
         )
