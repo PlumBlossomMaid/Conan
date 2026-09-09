@@ -21,4 +21,5 @@ preprocessing:
   max_batch_size: 8
   max_batch_frames: 12000
   max_attention_tokens: 12000000
+  memory_limit: auto
   device: gpu:0
