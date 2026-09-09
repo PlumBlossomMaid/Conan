@@ -8,6 +8,7 @@ Usage:
     python entry/preprocess.py -c configs/preprocess_hubert.yaml
 """
 
+import gc
 import json
 import random
 import sys
@@ -122,6 +123,89 @@ def _load_batch(batch_files: list[Path], audio_cfg: dict):
     return samples
 
 
+def _work_units(path: Path, sample_rate: int, hop_size: int) -> int:
+    frames = _estimate_mel_frames(path, sample_rate, hop_size)
+    return max(frames, 1) ** 2
+
+
+def _completed_groups(h5f: h5py.File) -> int:
+    count = 0
+    while True:
+        key = f"{count:08d}"
+        if key not in h5f:
+            break
+        group = h5f[key]
+        if "mel" not in group or "hubert" not in group:
+            del h5f[key]
+            break
+        count += 1
+    for key in list(h5f.keys()):
+        if key.isdigit() and int(key) >= count:
+            del h5f[key]
+    return count
+
+
+def _memory_status() -> str:
+    status = Path("/proc/self/status")
+    if status.exists():
+        rss_mb = int(status.read_text().split("VmRSS:")[1].split()[0]) / 1024
+    else:
+        rss_mb = 0
+    paths = _cgroup_memory_paths()
+    if paths is not None:
+        limit_text = paths[1].read_text().strip()
+        if limit_text not in {"max"} and int(limit_text) < 2**60:
+            return f"rss={rss_mb:.0f}MB cgroup={int(paths[0].read_text()) / 1024**2:.0f}MB/{int(limit_text) / 1024**2:.0f}MB"
+    return f"rss={rss_mb:.0f}MB"
+
+
+def _cgroup_memory_paths() -> tuple[Path, Path] | None:
+    candidates = [
+        (Path("/sys/fs/cgroup/memory.current"), Path("/sys/fs/cgroup/memory.max")),
+        (Path("/sys/fs/cgroup/memory/memory.usage_in_bytes"), Path("/sys/fs/cgroup/memory/memory.limit_in_bytes")),
+    ]
+    for current, limit in candidates:
+        if current.exists() and limit.exists():
+            return current, limit
+    return None
+
+
+def _memory_limit_bytes() -> int | None:
+    paths = _cgroup_memory_paths()
+    if paths is None:
+        return None
+    value = paths[1].read_text().strip()
+    return None if value == "max" or int(value) >= 2**60 else int(value)
+
+
+def _memory_ratio() -> float | None:
+    paths = _cgroup_memory_paths()
+    limit_bytes = _memory_limit_bytes()
+    if paths is None or limit_bytes is None:
+        return None
+    return int(paths[0].read_text()) / limit_bytes
+
+
+def _memory_budget_ratio(config: dict) -> float:
+    value = config.get("memory_limit", "auto")
+    if isinstance(value, str) and value.lower() == "auto":
+        ratio = 0.65 if _memory_limit_bytes() is not None else 0.80
+    else:
+        ratio = float(value)
+    if not 0 < ratio < 1:
+        raise ValueError("memory_limit must be 'auto' or a ratio between 0 and 1")
+    return ratio
+
+
+def _ensure_memory_headroom(max_ratio: float) -> None:
+    ratio = _memory_ratio()
+    if ratio is not None and ratio >= max_ratio:
+        raise RuntimeError(
+            f"Stopping before cgroup OOM: memory usage is {ratio:.1%}, "
+            f"limit is configured at {max_ratio:.1%}. Re-run to resume completed HDF5 groups."
+        )
+
+
 def _run_hubert_batch(model: HubertTeacher, samples: list[dict]) -> list[np.ndarray]:
     with paddle.no_grad():
         feature_list = [
@@ -137,7 +221,28 @@ def _run_hubert_batch(model: HubertTeacher, samples: list[dict]) -> list[np.ndar
             features[index, :feature.shape[0], :] = feature
             padding_mask[index, :feature.shape[0]] = False
         outputs = model.encode_features(features, padding_mask=padding_mask).numpy()
-    return [outputs[i, :feature.shape[0], :] for i, feature in enumerate(feature_list)]
+    result = [outputs[i, :feature.shape[0], :].copy() for i, feature in enumerate(feature_list)]
+    del feature_list, features, padding_mask, outputs
+    return result
+
+
+def _is_memory_error(error: RuntimeError) -> bool:
+    message = str(error).lower()
+    return any(token in message for token in ("out of memory", "out_of_memory", "oom", "hip error"))
+
+
+def _run_hubert_batch_resilient(model: HubertTeacher, samples: list[dict]) -> list[np.ndarray]:
+    try:
+        return _run_hubert_batch(model, samples)
+    except Exception as error:
+        if not _is_memory_error(error) or len(samples) == 1:
+            raise
+        midpoint = len(samples) // 2
+        del error
+        gc.collect()
+        return _run_hubert_batch_resilient(model, samples[:midpoint]) + _run_hubert_batch_resilient(
+            model, samples[midpoint:]
+        )
 
 
 class HubertPreprocessor:
@@ -169,9 +274,6 @@ class HubertPreprocessor:
 
         train_h5 = output_dir / "train.h5"
         valid_h5 = output_dir / "valid.h5"
-        for h5_path in (train_h5, valid_h5):
-            if h5_path.exists():
-                raise FileExistsError(f"{h5_path} exists. Delete it manually before re-running.")
 
         n_valid = min(int(self.data_cfg.get("n_valid", 150)), len(files) // 10)
         valid_seed = int(self.data_cfg.get("valid_seed", 1234))
@@ -196,6 +298,9 @@ class HubertPreprocessor:
         max_batch_frames = int(self.preprocessing_cfg.get("max_batch_frames", 0))
         max_attention_tokens = int(self.preprocessing_cfg.get("max_attention_tokens", 0))
 
+        self.memory_limit = self.preprocessing_cfg.get("memory_limit", "auto")
+        self.memory_limit_ratio = _memory_budget_ratio(self.preprocessing_cfg)
+
         t0 = time.time()
         ok_train = self._write_split(train_h5, train_files, model, "preprocess-train")
         ok_valid = self._write_split(valid_h5, valid_files, model, "preprocess-valid")
@@ -210,6 +315,8 @@ class HubertPreprocessor:
             "max_batch_size": max_batch_size,
             "max_batch_frames": max_batch_frames,
             "max_attention_tokens": max_attention_tokens,
+            "memory_limit": self.memory_limit,
+            "memory_limit_ratio": self.memory_limit_ratio,
             "n_valid": n_valid,
             "valid_seed": valid_seed,
             "split": "random",
@@ -239,9 +346,13 @@ class HubertPreprocessor:
             sample_rate,
             hop_size,
         )
+        ordered_files = [path for batch in batches for path in batch]
+        work_units = [_work_units(path, sample_rate, hop_size) for path in ordered_files]
+        total_work = sum(work_units)
 
         ok = 0
-        with h5py.File(h5_path, "w") as h5f:
+        mode = "a" if h5_path.exists() else "w"
+        with h5py.File(h5_path, mode) as h5f:
             for key, value in {
                 "sample_rate": int(self.audio_cfg.get("sample_rate", 16000)),
                 "n_mels": int(self.audio_cfg.get("num_mels", 80)),
@@ -251,11 +362,25 @@ class HubertPreprocessor:
             }.items():
                 h5f.attrs[key] = value
 
-            pbar = tqdm(total=len(files), desc=split_name, unit="files", dynamic_ncols=True)
+            ok = _completed_groups(h5f)
+            if ok > len(ordered_files):
+                raise RuntimeError(f"{h5_path} contains {ok} samples but input has only {len(ordered_files)} files")
+            remaining_files = ordered_files[ok:]
+            batches = _batches(
+                remaining_files,
+                batch_size,
+                max_batch_frames,
+                max_attention_tokens,
+                sample_rate,
+                hop_size,
+            )
+            pbar = tqdm(total=total_work, initial=sum(work_units[:ok]), desc=split_name, unit="work", dynamic_ncols=True)
             start_time = time.time()
             for batch_files in batches:
+                _ensure_memory_headroom(self.memory_limit_ratio)
                 samples = _load_batch(batch_files, self.audio_cfg)
-                emb = _run_hubert_batch(model, samples)
+                _ensure_memory_headroom(self.memory_limit_ratio)
+                emb = _run_hubert_batch_resilient(model, samples)
                 for i, sample in enumerate(samples):
                     n_frames = min(sample["n_frames"] + 1, emb[i].shape[0], sample["mel"].shape[-1])
                     grp = h5f.create_group(f"{ok:08d}")
@@ -266,11 +391,14 @@ class HubertPreprocessor:
                     grp.attrs["hubert_frames"] = n_frames
                     grp.attrs["audio_samples"] = len(sample["audio"])
                     ok += 1
-
-                pbar.update(len(batch_files))
+                h5f.flush()
+                pbar.update(sum(work_units[ok - len(batch_files) : ok]))
                 elapsed = time.time() - start_time
                 if elapsed > 0:
-                    pbar.set_postfix(speed=f"{ok / elapsed:.1f}/s")
+                    completed_work = sum(work_units[:ok])
+                    pbar.set_postfix(speed=f"{completed_work / elapsed:.1f} work/s", memory=_memory_status())
+                del samples, emb
+                gc.collect()
             pbar.close()
 
         return ok

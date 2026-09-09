@@ -1,6 +1,6 @@
 # ============================================================================
-# Conan — Preprocess: LibriTTS archive extraction
-# Flattens LibriTTS audio archives into data/libritts/wavs.
+# Conan — Preprocess: LibriTTS audio preparation
+# Consumes audio files prepared by an external dataset tool.
 # ============================================================================
 
 base_config: configs/base.yaml
@@ -8,9 +8,4 @@ base_config: configs/base.yaml
 preprocess_cls: entry.preprocess_libritts.LibriTTSPreprocessor
 
 data:
-  archive_dir: data
-  wavs_dir: data/libritts/wavs
-  output_dir: data/libritts
-
-preprocessing:
-  flatten_existing: false
+  audio_dir: data/libritts/wavs
