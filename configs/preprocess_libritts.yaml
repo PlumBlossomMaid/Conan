@@ -8,4 +8,4 @@ base_config: configs/base.yaml
 preprocess_cls: entry.preprocess_libritts.LibriTTSPreprocessor
 
 data:
-  audio_dir: data/libritts/wavs
+  audio_dir: /tmp/conan_dataset/LibriTTS_audio

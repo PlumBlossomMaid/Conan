@@ -9,10 +9,10 @@ preprocess_cls: entry.preprocess_hubert.HubertPreprocessor
 
 # 数据路径
 data:
-  wavs_dir: data/libritts/wavs
-  output_dir: data/libritts
-  hubert_emb_dir: data/libritts/hubert_embeddings
-  hubert_checkpoint: ckpts/hubert_teacher/hubert4_paddle_aligned_20260818.pdparams
+  wavs_dir: /tmp/conan_dataset/LibriTTS_audio
+  output_dir: /tmp/conan_dataset/LibriTTS_hubert
+  hubert_emb_dir: /tmp/conan_dataset/LibriTTS_hubert
+  hubert_checkpoint: /tmp/conan_dataset/AMD_server/hubert4_paddle_aligned_20260818.pdparams
   n_valid: 150
   valid_seed: 1234
 
@@ -22,4 +22,4 @@ preprocessing:
   max_batch_frames: 12000
   max_attention_tokens: 12000000
   memory_limit: auto
-  device: gpu:0
+  device: iluvatar_gpu:0

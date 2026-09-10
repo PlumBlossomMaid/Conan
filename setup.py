@@ -35,6 +35,7 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "paddleocean @ git+https://github.com/PlumBlossomMaid/PaddleOcean.git",
+        "paddle-nnAudio>=0.0.3",
         "librosa>=0.10.0",
         "soundfile>=0.12.0",
         "scipy>=1.10.0",

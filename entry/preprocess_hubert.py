@@ -13,6 +13,7 @@ import json
 import random
 import sys
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Union
 
@@ -21,6 +22,7 @@ import librosa
 import numpy as np
 import paddle
 import soundfile as sf
+from ppAudio.features import STFT
 from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -83,29 +85,33 @@ def _load_audio(path: Path, sample_rate: int) -> np.ndarray:
     return audio.astype(np.float32)
 
 
-def _compute_mel(
-    audio: np.ndarray,
+def _compute_mel_batch(
+    audios: list[np.ndarray],
     sample_rate: int,
     n_mels: int,
     n_fft: int,
     hop_size: int,
     win_size: int,
-) -> np.ndarray:
-    spec = librosa.stft(
-        audio,
-        n_fft=n_fft,
-        hop_length=hop_size,
-        win_length=win_size,
-        window="hann",
-        center=True,
-    )
-    mag = np.abs(spec)
-    mel_basis = librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels)
-    mel = np.dot(mel_basis, mag)
-    return np.log10(np.clip(mel, 1e-5, None)).astype(np.float32)
+    stft_layer: STFT,
+    mel_basis: paddle.Tensor,
+) -> list[np.ndarray]:
+    """GPU Mel：STFT 幅值 -> mel 矩阵乘 -> log10，与旧 CPU 算法仅存在
+    可接受的数值误差（卷积实现 STFT、log10 前 clip）。"""
+    lengths = [len(audio) for audio in audios]
+    max_len = max(lengths)
+    padded = np.zeros([len(audios), max_len], dtype="float32")
+    for index, audio in enumerate(audios):
+        padded[index, : len(audio)] = audio
+    source = paddle.to_tensor(padded)
+    mag = stft_layer(source, output_format="Magnitude")
+    mel = paddle.matmul(mel_basis, mag)
+    mel = paddle.log10(paddle.clip(mel, min=1e-5))
+    mel_np = mel.numpy()
+    frames = [mel_np[index, :, : int(np.ceil(length / hop_size)) + 1] for index, length in enumerate(lengths)]
+    return frames
 
 
-def _load_batch(batch_files: list[Path], audio_cfg: dict):
+def _load_batch(batch_files: list[Path], audio_cfg: dict, stft_layer: STFT, mel_basis: paddle.Tensor):
     samples = []
     sample_rate = int(audio_cfg.get("sample_rate", 16000))
     n_mels = int(audio_cfg.get("num_mels", 80))
@@ -113,12 +119,14 @@ def _load_batch(batch_files: list[Path], audio_cfg: dict):
     hop_size = int(audio_cfg.get("hop_size", 320))
     win_size = int(audio_cfg.get("win_size", 1024))
 
-    for path in batch_files:
-        audio = _load_audio(path, sample_rate)
+    audios = [_load_audio(path, sample_rate) for path in batch_files]
+    mels = _compute_mel_batch(
+        audios, sample_rate, n_mels, n_fft, hop_size, win_size, stft_layer, mel_basis
+    )
+    for path, audio, mel in zip(batch_files, audios, mels):
         n_frames = _hubert_frames(len(audio))
         if n_frames <= 0:
             raise ValueError(f"{path} is too short for HuBERT: {len(audio)} samples")
-        mel = _compute_mel(audio, sample_rate, n_mels, n_fft, hop_size, win_size)
         samples.append({"path": path, "audio": audio, "mel": mel, "n_frames": n_frames})
     return samples
 
@@ -315,6 +323,30 @@ class HubertPreprocessor:
         if device == "gpu":
             device = "gpu:0"
         paddle.set_device(device)
+
+        sample_rate = int(self.audio_cfg.get("sample_rate", 16000))
+        n_mels = int(self.audio_cfg.get("num_mels", 80))
+        n_fft = int(self.audio_cfg.get("n_fft", 1024))
+        hop_size = int(self.audio_cfg.get("hop_size", 320))
+        win_size = int(self.audio_cfg.get("win_size", 1024))
+
+        # GPU Mel/STFT：将频谱计算保持在加速器上，避免每帧回 CPU。
+        stft_layer = STFT(
+            n_fft=n_fft,
+            hop_length=hop_size,
+            win_length=win_size,
+            window="hann",
+            center=True,
+            pad_mode="reflect",
+            output_format="Magnitude",
+            verbose=False,
+        )
+        stft_layer.eval()
+        mel_basis = paddle.to_tensor(
+            librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=n_mels),
+            dtype="float32",
+        )
+
         model = HubertTeacher()
         model.load_pretrained(checkpoint_path)
         model.eval()
@@ -327,8 +359,8 @@ class HubertPreprocessor:
         self.memory_limit_ratio = _memory_budget_ratio(self.preprocessing_cfg)
 
         t0 = time.time()
-        ok_train = self._write_split(train_h5, train_files, model, "preprocess-train")
-        ok_valid = self._write_split(valid_h5, valid_files, model, "preprocess-valid")
+        ok_train = self._write_split(train_h5, train_files, model, "preprocess-train", stft_layer, mel_basis)
+        ok_valid = self._write_split(valid_h5, valid_files, model, "preprocess-valid", stft_layer, mel_basis)
 
         meta = {
             "total": ok_train + ok_valid,
@@ -357,6 +389,8 @@ class HubertPreprocessor:
         files: list[Path],
         model: HubertTeacher,
         split_name: str,
+        stft_layer: STFT,
+        mel_basis: paddle.Tensor,
     ) -> int:
         batch_size = int(self.preprocessing_cfg.get("max_batch_size", 8))
         max_batch_frames = int(self.preprocessing_cfg.get("max_batch_frames", 0))
@@ -403,7 +437,7 @@ class HubertPreprocessor:
             start_time = time.time()
             for batch_files in batches:
                 _ensure_memory_headroom(self.memory_limit_ratio)
-                samples = _load_batch(batch_files, self.audio_cfg)
+                samples = _load_batch(batch_files, self.audio_cfg, stft_layer, mel_basis)
                 _ensure_memory_headroom(self.memory_limit_ratio)
                 emb = _run_hubert_batch_resilient(model, samples)
                 for i, sample in enumerate(samples):
@@ -411,7 +445,11 @@ class HubertPreprocessor:
                     grp = h5f.create_group(f"{ok:08d}")
                     grp.create_dataset("mel", data=sample["mel"][:, :n_frames], compression="gzip")
                     grp.create_dataset("hubert", data=emb[i][:n_frames].astype(np.float32), compression="gzip")
-                    grp.attrs["source_path"] = str(sample["path"].relative_to(PROJECT_ROOT))
+                    try:
+                        source_path = str(sample["path"].relative_to(PROJECT_ROOT))
+                    except ValueError:
+                        source_path = str(sample["path"])
+                    grp.attrs["source_path"] = source_path
                     grp.attrs["mel_frames"] = n_frames
                     grp.attrs["hubert_frames"] = n_frames
                     grp.attrs["audio_samples"] = len(sample["audio"])
