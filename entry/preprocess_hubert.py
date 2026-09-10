@@ -171,12 +171,12 @@ def _hubert_frames(n_samples: int) -> int:
     return hubert_frame_count(n_samples)
 
 
-def _load_audio(path: Path, sample_rate: int) -> np.ndarray:
+def _load_audio(path: Path, sample_rate: int, resample: str = "soxr_hq") -> np.ndarray:
     audio, sr = sf.read(str(path), dtype="float32")
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
     if sr != sample_rate:
-        audio = librosa.resample(audio, orig_sr=sr, target_sr=sample_rate)
+        audio = librosa.resample(audio, orig_sr=sr, target_sr=sample_rate, res_type=resample)
     return audio.astype(np.float32)
 
 
@@ -206,23 +206,29 @@ def _compute_mel_batch(
     return frames
 
 
-def _load_audio_worker(item: tuple[Path, int]) -> np.ndarray:
+def _load_audio_worker(item: tuple[Path, int, str]) -> np.ndarray:
     """Module-level worker so both thread and process pools can call it."""
-    return _load_audio(item[0], item[1])
+    return _load_audio(item[0], item[1], item[2])
 
 
 def _load_audios(
-    batch_files: list[Path], sample_rate: int, executor: Executor | None = None
+    batch_files: list[Path],
+    sample_rate: int,
+    executor: Executor | None = None,
+    resample: str = "soxr_hq",
 ) -> list[np.ndarray]:
     """Load and resample audio files (CPU-bound, parallelizable)."""
     if executor is not None:
-        items = [(path, sample_rate) for path in batch_files]
+        items = [(path, sample_rate, resample) for path in batch_files]
         return list(executor.map(_load_audio_worker, items))
-    return [_load_audio(path, sample_rate) for path in batch_files]
+    return [_load_audio(path, sample_rate, resample) for path in batch_files]
 
 
 def _submit_load(
-    batch_files: list[Path], sample_rate: int, executor: Executor | None
+    batch_files: list[Path],
+    sample_rate: int,
+    executor: Executor | None,
+    resample: str = "soxr_hq",
 ) -> list | None:
     """Start audio loads in the background so the GPU never waits on them.
 
@@ -231,7 +237,7 @@ def _submit_load(
     """
     if executor is None:
         return None
-    items = [(path, sample_rate) for path in batch_files]
+    items = [(path, sample_rate, resample) for path in batch_files]
     return [executor.submit(_load_audio_worker, item) for item in items]
 
 
@@ -269,7 +275,8 @@ def _load_batch(
     executor: Executor | None = None,
 ):
     sample_rate = int(audio_cfg.get("sample_rate", 16000))
-    audios = _load_audios(batch_files, sample_rate, executor)
+    resample = str(audio_cfg.get("resample", "soxr_hq"))
+    audios = _load_audios(batch_files, sample_rate, executor, resample)
     return _prepare_batch(audios, batch_files, audio_cfg, stft_layer, mel_basis)
 
 
@@ -656,6 +663,7 @@ class HubertPreprocessor:
                 hop_size,
             )
             loader_pool = self._make_loader_pool()
+            resample = str(self.audio_cfg.get("resample", "soxr_hq"))
             try:
                 pbar = tqdm(total=total_work, initial=sum(work_units[:ok]), desc=split_name, unit="work", dynamic_ncols=True)
                 start_time = time.time()
@@ -666,12 +674,12 @@ class HubertPreprocessor:
                         audios = [f.result() for f in prefetched]
                         prefetched = None
                     else:
-                        audios = _load_audios(batch_files, sample_rate, loader_pool)
+                        audios = _load_audios(batch_files, sample_rate, loader_pool, resample)
                     # Eagerly start the next batch's audio load while the GPU
                     # works on this batch's mel + HuBERT compute.
                     if batch_index + 1 < len(batches):
                         prefetched = _submit_load(
-                            batches[batch_index + 1], sample_rate, loader_pool
+                            batches[batch_index + 1], sample_rate, loader_pool, resample
                         )
                     _ensure_memory_headroom(self.memory_limit_ratio)
                     samples = _prepare_batch(audios, batch_files, self.audio_cfg, stft_layer, mel_basis)
