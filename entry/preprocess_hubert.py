@@ -397,6 +397,8 @@ class HubertPreprocessor:
         max_attention_tokens = int(self.preprocessing_cfg.get("max_attention_tokens", 0))
         sample_rate = int(self.audio_cfg.get("sample_rate", 16000))
         hop_size = int(self.audio_cfg.get("hop_size", 320))
+        compression = self.preprocessing_cfg.get("hdf5_compression", "gzip")
+        compression = None if str(compression).lower() in ("none", "off", "0") else str(compression)
         batches = _batches(
             files,
             batch_size,
@@ -443,8 +445,8 @@ class HubertPreprocessor:
                 for i, sample in enumerate(samples):
                     n_frames = min(sample["n_frames"] + 1, emb[i].shape[0], sample["mel"].shape[-1])
                     grp = h5f.create_group(f"{ok:08d}")
-                    grp.create_dataset("mel", data=sample["mel"][:, :n_frames], compression="gzip")
-                    grp.create_dataset("hubert", data=emb[i][:n_frames].astype(np.float32), compression="gzip")
+                    grp.create_dataset("mel", data=sample["mel"][:, :n_frames], compression=compression)
+                    grp.create_dataset("hubert", data=emb[i][:n_frames].astype(np.float32), compression=compression)
                     try:
                         source_path = str(sample["path"].relative_to(PROJECT_ROOT))
                     except ValueError:
