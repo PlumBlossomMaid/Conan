@@ -669,18 +669,19 @@ class HubertPreprocessor:
                 start_time = time.time()
                 prefetched = None
                 for batch_index, batch_files in enumerate(batches):
+                    # Overlap audio loads for the next two batches with this
+                    # batch's GPU compute; 2-deep hides the long load times
+                    # seen on mid/long clips with a 4-core CPU quota.
                     if prefetched is not None:
                         # Submitted one full GPU cycle ago; normally already done.
                         audios = [f.result() for f in prefetched]
-                        prefetched = None
                     else:
                         audios = _load_audios(batch_files, sample_rate, loader_pool, resample)
-                    # Eagerly start the next batch's audio load while the GPU
-                    # works on this batch's mel + HuBERT compute.
                     if batch_index + 1 < len(batches):
-                        prefetched = _submit_load(
-                            batches[batch_index + 1], sample_rate, loader_pool, resample
-                        )
+                        items = [(path, sample_rate, resample) for path in batches[batch_index + 1]]
+                        prefetched = [loader_pool.submit(_load_audio_worker, item) for item in items]
+                    else:
+                        prefetched = None
                     _ensure_memory_headroom(self.memory_limit_ratio)
                     samples = _prepare_batch(audios, batch_files, self.audio_cfg, stft_layer, mel_basis)
                     _ensure_memory_headroom(self.memory_limit_ratio)
