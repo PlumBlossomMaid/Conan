@@ -13,7 +13,7 @@ import json
 import random
 import sys
 import time
-from concurrent.futures import Executor, ThreadPoolExecutor
+from concurrent.futures import Executor, ThreadPoolExecutor, ProcessPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 from typing import Union
@@ -34,6 +34,15 @@ from layers.batching import batch_by_files
 from layers.hubert import HubertTeacher, hubert_frame_count
 
 AUDIO_SUFFIXES = {".wav", ".flac"}
+
+# Per-batch cost model (ms), fit on the target hardware: HuBERT attention
+# dominates once the padded window is non-trivial, with a fixed floor for
+# launching the CNN + 9 transformer layers. Audio load / mel / HDF5 write run
+# while the GPU is busy and only bind when the batch is tiny.
+BATCH_COST_FLOOR_MS = 100.0
+BATCH_COST_PER_TOKEN = 2.0e-6
+BATCH_PIPELINE_BASE_MS = 8.0
+BATCH_PIPELINE_PER_SAMPLE = 1.0
 
 
 def _resolve_path(path: Union[str, Path]) -> Path:
@@ -63,6 +72,91 @@ def _batches(
         sort_by_len=True,
         grid=1,
     )
+
+
+def _estimated_batch_cost_ms(
+    files: list[Path], sample_rate: int, hop_size: int
+) -> float:
+    """Cheap estimate of one batch's wall time in milliseconds.
+
+    On this hardware HuBERT inference cost is dominated by the padded
+    attention window, which scales with ``batch_size * max_frames^2``, with a
+    large fixed floor for launching the CNN feature extractor and 9
+    transformer layers. The fixed cost (audio load + mel + HDF5 write) runs
+    while the GPU is busy, so it only matters when the batch is tiny.
+    """
+    max_frames = max(_estimate_mel_frames(path, sample_rate, hop_size) for path in files)
+    return BATCH_COST_FLOOR_MS + BATCH_COST_PER_TOKEN * len(files) * max_frames * max_frames
+
+
+def _total_wall_ms(
+    files: list[Path],
+    batch_size: int,
+    max_batch_frames: int,
+    max_attention_tokens: int,
+    sample_rate: int,
+    hop_size: int,
+) -> float:
+    """Estimated wall time (ms) to process ``files`` under these limits."""
+    batches = _batches(
+        files,
+        batch_size,
+        max_batch_frames,
+        max_attention_tokens,
+        sample_rate,
+        hop_size,
+    )
+    total = 0.0
+    for batch in batches:
+        total += max(
+            _estimated_batch_cost_ms(batch, sample_rate, hop_size),
+            _estimated_pipeline_ms(batch, sample_rate, hop_size),
+        )
+    return total
+
+
+def _estimated_pipeline_ms(
+    files: list[Path], sample_rate: int, hop_size: int
+) -> float:
+    """Audio-load + mel-prep + HDF5-write time, overlapped with the GPU."""
+    samples = sum(max(_estimate_mel_frames(path, sample_rate, hop_size), 1) for path in files)
+    return BATCH_PIPELINE_BASE_MS + BATCH_PIPELINE_PER_SAMPLE * samples
+
+
+def _tune_batch_limits(
+    files: list[Path],
+    max_batch_size: int,
+    max_batch_frames: int,
+    max_attention_tokens: int,
+    sample_rate: int,
+    hop_size: int,
+    preprocessing_cfg: dict,
+) -> tuple[int, int, int]:
+    """Auto-tune batch limits from the *resumed* corpus.
+
+    Both caps can be pinned explicitly and are always honored. When the
+    user leaves ``max_attention_tokens`` unset, drop it: at bs=16 a
+    single ~1700-frame clip needs 4.6M tokens, and padding-free packing
+    raises work per GPU batch. ``max_batch_frames`` bounds the padding
+    cost for the rare long clip.
+    """
+    pinned = int(preprocessing_cfg.get("auto_max_batch_size", 0))
+    if pinned > 0:
+        max_batch_size = pinned
+    if len(files) == 0 or max_batch_size <= 0:
+        return max_batch_size, max_batch_frames, max_attention_tokens
+
+    if max_attention_tokens <= 0:
+        # No attention cap: packs more per batch and removes the padding tax
+        # on the long clips that dominate the remainder of the corpus.
+        if max_batch_frames <= 0:
+            max_batch_frames = 24000
+        return max_batch_size, max_batch_frames, 0
+    if max_batch_frames <= 0:
+        # Cap padding without capping attention: keeps single-clip batches
+        # from ballooning while letting short clips pack together.
+        return max_batch_size, 24000, max_attention_tokens
+    return max_batch_size, max_batch_frames, max_attention_tokens
 
 
 def _estimate_mel_frames(path: Path, sample_rate: int, hop_size: int) -> int:
@@ -112,6 +206,47 @@ def _compute_mel_batch(
     return frames
 
 
+def _load_audio_worker(item: tuple[Path, int]) -> np.ndarray:
+    """Module-level worker so both thread and process pools can call it."""
+    return _load_audio(item[0], item[1])
+
+
+def _load_audios(
+    batch_files: list[Path], sample_rate: int, executor: Executor | None = None
+) -> list[np.ndarray]:
+    """Load and resample audio files (CPU-bound, parallelizable)."""
+    if executor is not None:
+        items = [(path, sample_rate) for path in batch_files]
+        return list(executor.map(_load_audio_worker, items))
+    return [_load_audio(path, sample_rate) for path in batch_files]
+
+
+def _prepare_batch(
+    audios: list[np.ndarray],
+    batch_files: list[Path],
+    audio_cfg: dict,
+    stft_layer: STFT,
+    mel_basis: paddle.Tensor,
+) -> list[dict]:
+    """GPU mel + sample dict assembly from pre-loaded audio."""
+    sample_rate = int(audio_cfg.get("sample_rate", 16000))
+    n_mels = int(audio_cfg.get("num_mels", 80))
+    n_fft = int(audio_cfg.get("n_fft", 1024))
+    hop_size = int(audio_cfg.get("hop_size", 320))
+    win_size = int(audio_cfg.get("win_size", 1024))
+
+    mels = _compute_mel_batch(
+        audios, sample_rate, n_mels, n_fft, hop_size, win_size, stft_layer, mel_basis
+    )
+    samples = []
+    for path, audio, mel in zip(batch_files, audios, mels):
+        n_frames = _hubert_frames(len(audio))
+        if n_frames <= 0:
+            raise ValueError(f"{path} is too short for HuBERT: {len(audio)} samples")
+        samples.append({"path": path, "audio": audio, "mel": mel, "n_frames": n_frames})
+    return samples
+
+
 def _load_batch(
     batch_files: list[Path],
     audio_cfg: dict,
@@ -119,27 +254,32 @@ def _load_batch(
     mel_basis: paddle.Tensor,
     executor: Executor | None = None,
 ):
-    samples = []
     sample_rate = int(audio_cfg.get("sample_rate", 16000))
-    n_mels = int(audio_cfg.get("num_mels", 80))
-    n_fft = int(audio_cfg.get("n_fft", 1024))
-    hop_size = int(audio_cfg.get("hop_size", 320))
-    win_size = int(audio_cfg.get("win_size", 1024))
+    audios = _load_audios(batch_files, sample_rate, executor)
+    return _prepare_batch(audios, batch_files, audio_cfg, stft_layer, mel_basis)
 
-    if executor is not None:
-        audios = list(executor.map(lambda path: _load_audio(path, sample_rate), batch_files))
-    else:
-        audios = [_load_audio(path, sample_rate) for path in batch_files]
 
-    mels = _compute_mel_batch(
-        audios, sample_rate, n_mels, n_fft, hop_size, win_size, stft_layer, mel_basis
-    )
-    for path, audio, mel in zip(batch_files, audios, mels):
-        n_frames = _hubert_frames(len(audio))
-        if n_frames <= 0:
-            raise ValueError(f"{path} is too short for HuBERT: {len(audio)} samples")
-        samples.append({"path": path, "audio": audio, "mel": mel, "n_frames": n_frames})
-    return samples
+def _write_group(
+    h5f: h5py.File,
+    idx: int,
+    sample: dict,
+    emb: np.ndarray,
+    n_frames: int,
+    compression: str | None,
+) -> int:
+    """Write a single sample to HDF5 and return the new index."""
+    grp = h5f.create_group(f"{idx:08d}")
+    grp.create_dataset("mel", data=sample["mel"][:, :n_frames], compression=compression)
+    grp.create_dataset("hubert", data=emb[:n_frames].astype(np.float32), compression=compression)
+    try:
+        source_path = str(sample["path"].relative_to(PROJECT_ROOT))
+    except ValueError:
+        source_path = str(sample["path"])
+    grp.attrs["source_path"] = source_path
+    grp.attrs["mel_frames"] = n_frames
+    grp.attrs["hubert_frames"] = n_frames
+    grp.attrs["audio_samples"] = len(sample["audio"])
+    return idx + 1
 
 
 def _work_units(path: Path, sample_rate: int, hop_size: int) -> int:
@@ -185,12 +325,11 @@ def _memory_status() -> str:
                     except ValueError:
                         pass
                 break
-    paths = _cgroup_memory_paths()
-    if paths is not None:
-        current = _read_int(paths[0])
-        limit = _read_int(paths[1])
-        if current is not None and limit is not None and limit < 2**60:
-            return f"rss={rss_mb:.0f}MB cgroup={current / 1024**2:.0f}MB/{limit / 1024**2:.0f}MB"
+    anon_mb = _memory_anon_bytes()
+    anon_mb = None if anon_mb is None else anon_mb / 1024**2
+    limit_bytes = _memory_limit_bytes()
+    if anon_mb is not None and limit_bytes is not None and limit_bytes < 2**60:
+        return f"rss={rss_mb:.0f}MB anon={anon_mb:.0f}MB limit={limit_bytes / 1024**2:.0f}MB"
     return f"rss={rss_mb:.0f}MB"
 
 
@@ -214,14 +353,43 @@ def _memory_limit_bytes() -> int | None:
 
 
 def _memory_ratio() -> float | None:
-    paths = _cgroup_memory_paths()
+    """Return the non-reclaimable (anonymous) memory ratio against the cgroup limit.
+
+    cgroup v1/v2 ``usage`` counters include page cache, which is evicted under
+    pressure and never triggers the OOM killer. Using total usage here would
+    stop a healthy job long before any real risk, because preprocessing both
+    reads hundreds of GB of WAVs and writes many GB of HDF5.
+    """
+    anon_bytes = _memory_anon_bytes()
     limit_bytes = _memory_limit_bytes()
-    if paths is None or limit_bytes is None:
+    if anon_bytes is None or limit_bytes is None:
         return None
-    current_bytes = _read_int(paths[0])
-    if current_bytes is None:
+    return anon_bytes / limit_bytes
+
+
+def _memory_anon_bytes() -> int | None:
+    """Non-reclaimable resident memory in bytes, ignoring page cache."""
+    paths = _cgroup_memory_paths()
+    if paths is None:
         return None
-    return current_bytes / limit_bytes
+    stat_path = paths[0].parent / "memory.stat"
+    if not stat_path.exists():
+        return None
+    try:
+        lines = stat_path.read_text().splitlines()
+    except OSError:
+        return None
+    # cgroup v2 reports anonymous memory as "anon"; cgroup v1 reports "rss"
+    # (rss is already page-cache-free on v1).
+    for key in ("anon", "rss"):
+        for line in lines:
+            parts = line.split()
+            if len(parts) == 2 and parts[0] == key:
+                try:
+                    return int(parts[1])
+                except ValueError:
+                    return None
+    return None
 
 
 def _memory_budget_ratio(config: dict) -> float:
@@ -295,6 +463,21 @@ class HubertPreprocessor:
         self.audio_cfg = config.get("audio", {})
         self.data_cfg = config.get("data", {})
         self.preprocessing_cfg = config.get("preprocessing", {})
+
+    def _make_loader_pool(self) -> Executor | None:
+        """Build the audio-loading pool: threads by default, processes when configured.
+
+        Threads overlap I/O with GPU compute; processes add real CPU parallelism
+        for librosa resampling but are only worthwhile when the machine has spare
+        cores (this box has 4).
+        """
+        mode = str(self.preprocessing_cfg.get("loader_mode", "thread"))
+        workers = int(self.preprocessing_cfg.get("loader_workers", 0))
+        if workers <= 0:
+            return None
+        if mode == "process":
+            return ProcessPoolExecutor(max_workers=workers)
+        return ThreadPoolExecutor(max_workers=workers)
 
     def run(self):
         wavs_dir = _resolve_path(self.data_cfg.get("wavs_dir", "data/libritts/wavs"))
@@ -403,9 +586,15 @@ class HubertPreprocessor:
         stft_layer: STFT,
         mel_basis: paddle.Tensor,
     ) -> int:
-        batch_size = int(self.preprocessing_cfg.get("max_batch_size", 8))
-        max_batch_frames = int(self.preprocessing_cfg.get("max_batch_frames", 0))
-        max_attention_tokens = int(self.preprocessing_cfg.get("max_attention_tokens", 0))
+        batch_size, max_batch_frames, max_attention_tokens = _tune_batch_limits(
+            files,
+            int(self.preprocessing_cfg.get("max_batch_size", 8)),
+            int(self.preprocessing_cfg.get("max_batch_frames", 0)),
+            int(self.preprocessing_cfg.get("max_attention_tokens", 0)),
+            int(self.audio_cfg.get("sample_rate", 16000)),
+            int(self.audio_cfg.get("hop_size", 320)),
+            self.preprocessing_cfg,
+        )
         sample_rate = int(self.audio_cfg.get("sample_rate", 16000))
         hop_size = int(self.audio_cfg.get("hop_size", 320))
         compression = self.preprocessing_cfg.get("hdf5_compression", "gzip")
@@ -417,6 +606,12 @@ class HubertPreprocessor:
             max_attention_tokens,
             sample_rate,
             hop_size,
+        )
+        print(
+            f"{split_name}: {len(batches)} batches, "
+            f"batch_size={batch_size} max_batch_frames={max_batch_frames} "
+            f"max_attention_tokens={max_attention_tokens}",
+            flush=True,
         )
         ordered_files = [path for batch in batches for path in batch]
         work_units = [_work_units(path, sample_rate, hop_size) for path in ordered_files]
@@ -446,30 +641,18 @@ class HubertPreprocessor:
                 sample_rate,
                 hop_size,
             )
-            loader_workers = int(self.preprocessing_cfg.get("loader_workers", 0))
-            loader = ThreadPoolExecutor(max_workers=loader_workers) if loader_workers > 0 else None
+            loader_pool = self._make_loader_pool()
             try:
                 pbar = tqdm(total=total_work, initial=sum(work_units[:ok]), desc=split_name, unit="work", dynamic_ncols=True)
                 start_time = time.time()
                 for batch_files in batches:
                     _ensure_memory_headroom(self.memory_limit_ratio)
-                    samples = _load_batch(batch_files, self.audio_cfg, stft_layer, mel_basis, loader)
+                    samples = _load_batch(batch_files, self.audio_cfg, stft_layer, mel_basis, loader_pool)
                     _ensure_memory_headroom(self.memory_limit_ratio)
                     emb = _run_hubert_batch_resilient(model, samples)
                     for i, sample in enumerate(samples):
                         n_frames = min(sample["n_frames"] + 1, emb[i].shape[0], sample["mel"].shape[-1])
-                        grp = h5f.create_group(f"{ok:08d}")
-                        grp.create_dataset("mel", data=sample["mel"][:, :n_frames], compression=compression)
-                        grp.create_dataset("hubert", data=emb[i][:n_frames].astype(np.float32), compression=compression)
-                        try:
-                            source_path = str(sample["path"].relative_to(PROJECT_ROOT))
-                        except ValueError:
-                            source_path = str(sample["path"])
-                        grp.attrs["source_path"] = source_path
-                        grp.attrs["mel_frames"] = n_frames
-                        grp.attrs["hubert_frames"] = n_frames
-                        grp.attrs["audio_samples"] = len(sample["audio"])
-                        ok += 1
+                        ok = _write_group(h5f, ok, sample, emb[i], n_frames, compression)
                     h5f.flush()
                     pbar.update(sum(work_units[ok - len(batch_files) : ok]))
                     elapsed = time.time() - start_time
@@ -480,7 +663,7 @@ class HubertPreprocessor:
                     gc.collect()
                 pbar.close()
             finally:
-                if loader is not None:
-                    loader.shutdown(wait=True)
+                if loader_pool is not None:
+                    loader_pool.shutdown(wait=True)
 
         return ok
