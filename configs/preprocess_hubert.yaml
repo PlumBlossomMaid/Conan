@@ -25,4 +25,4 @@ preprocessing:
   device: iluvatar_gpu:0
   hdf5_compression: none
   loader_mode: process
-  loader_workers: 2
+  loader_workers: 4
