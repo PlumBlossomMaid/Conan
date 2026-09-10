@@ -24,3 +24,4 @@ preprocessing:
   memory_limit: auto
   device: iluvatar_gpu:0
   hdf5_compression: gzip
+  loader_workers: 2

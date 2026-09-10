@@ -13,6 +13,7 @@ import json
 import random
 import sys
 import time
+from concurrent.futures import Executor, ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 from typing import Union
@@ -111,7 +112,13 @@ def _compute_mel_batch(
     return frames
 
 
-def _load_batch(batch_files: list[Path], audio_cfg: dict, stft_layer: STFT, mel_basis: paddle.Tensor):
+def _load_batch(
+    batch_files: list[Path],
+    audio_cfg: dict,
+    stft_layer: STFT,
+    mel_basis: paddle.Tensor,
+    executor: Executor | None = None,
+):
     samples = []
     sample_rate = int(audio_cfg.get("sample_rate", 16000))
     n_mels = int(audio_cfg.get("num_mels", 80))
@@ -119,7 +126,11 @@ def _load_batch(batch_files: list[Path], audio_cfg: dict, stft_layer: STFT, mel_
     hop_size = int(audio_cfg.get("hop_size", 320))
     win_size = int(audio_cfg.get("win_size", 1024))
 
-    audios = [_load_audio(path, sample_rate) for path in batch_files]
+    if executor is not None:
+        audios = list(executor.map(lambda path: _load_audio(path, sample_rate), batch_files))
+    else:
+        audios = [_load_audio(path, sample_rate) for path in batch_files]
+
     mels = _compute_mel_batch(
         audios, sample_rate, n_mels, n_fft, hop_size, win_size, stft_layer, mel_basis
     )
@@ -435,35 +446,41 @@ class HubertPreprocessor:
                 sample_rate,
                 hop_size,
             )
-            pbar = tqdm(total=total_work, initial=sum(work_units[:ok]), desc=split_name, unit="work", dynamic_ncols=True)
-            start_time = time.time()
-            for batch_files in batches:
-                _ensure_memory_headroom(self.memory_limit_ratio)
-                samples = _load_batch(batch_files, self.audio_cfg, stft_layer, mel_basis)
-                _ensure_memory_headroom(self.memory_limit_ratio)
-                emb = _run_hubert_batch_resilient(model, samples)
-                for i, sample in enumerate(samples):
-                    n_frames = min(sample["n_frames"] + 1, emb[i].shape[0], sample["mel"].shape[-1])
-                    grp = h5f.create_group(f"{ok:08d}")
-                    grp.create_dataset("mel", data=sample["mel"][:, :n_frames], compression=compression)
-                    grp.create_dataset("hubert", data=emb[i][:n_frames].astype(np.float32), compression=compression)
-                    try:
-                        source_path = str(sample["path"].relative_to(PROJECT_ROOT))
-                    except ValueError:
-                        source_path = str(sample["path"])
-                    grp.attrs["source_path"] = source_path
-                    grp.attrs["mel_frames"] = n_frames
-                    grp.attrs["hubert_frames"] = n_frames
-                    grp.attrs["audio_samples"] = len(sample["audio"])
-                    ok += 1
-                h5f.flush()
-                pbar.update(sum(work_units[ok - len(batch_files) : ok]))
-                elapsed = time.time() - start_time
-                if elapsed > 0:
-                    completed_work = sum(work_units[:ok])
-                    pbar.set_postfix(speed=f"{completed_work / elapsed:.1f} work/s", memory=_memory_status())
-                del samples, emb
-                gc.collect()
-            pbar.close()
+            loader_workers = int(self.preprocessing_cfg.get("loader_workers", 0))
+            loader = ThreadPoolExecutor(max_workers=loader_workers) if loader_workers > 0 else None
+            try:
+                pbar = tqdm(total=total_work, initial=sum(work_units[:ok]), desc=split_name, unit="work", dynamic_ncols=True)
+                start_time = time.time()
+                for batch_files in batches:
+                    _ensure_memory_headroom(self.memory_limit_ratio)
+                    samples = _load_batch(batch_files, self.audio_cfg, stft_layer, mel_basis, loader)
+                    _ensure_memory_headroom(self.memory_limit_ratio)
+                    emb = _run_hubert_batch_resilient(model, samples)
+                    for i, sample in enumerate(samples):
+                        n_frames = min(sample["n_frames"] + 1, emb[i].shape[0], sample["mel"].shape[-1])
+                        grp = h5f.create_group(f"{ok:08d}")
+                        grp.create_dataset("mel", data=sample["mel"][:, :n_frames], compression=compression)
+                        grp.create_dataset("hubert", data=emb[i][:n_frames].astype(np.float32), compression=compression)
+                        try:
+                            source_path = str(sample["path"].relative_to(PROJECT_ROOT))
+                        except ValueError:
+                            source_path = str(sample["path"])
+                        grp.attrs["source_path"] = source_path
+                        grp.attrs["mel_frames"] = n_frames
+                        grp.attrs["hubert_frames"] = n_frames
+                        grp.attrs["audio_samples"] = len(sample["audio"])
+                        ok += 1
+                    h5f.flush()
+                    pbar.update(sum(work_units[ok - len(batch_files) : ok]))
+                    elapsed = time.time() - start_time
+                    if elapsed > 0:
+                        completed_work = sum(work_units[:ok])
+                        pbar.set_postfix(speed=f"{completed_work / elapsed:.1f} work/s", memory=_memory_status())
+                    del samples, emb
+                    gc.collect()
+                pbar.close()
+            finally:
+                if loader is not None:
+                    loader.shutdown(wait=True)
 
         return ok
