@@ -23,5 +23,5 @@ preprocessing:
   max_attention_tokens: 12000000
   memory_limit: auto
   device: iluvatar_gpu:0
-  hdf5_compression: gzip
+  hdf5_compression: none
   loader_workers: 2
