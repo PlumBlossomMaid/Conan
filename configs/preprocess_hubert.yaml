@@ -18,7 +18,7 @@ data:
 
 # 单进程 Paddle HuBERT，使用动态帧预算并在显存不足时递归缩小批次
 preprocessing:
-  max_batch_size: 16
+  max_batch_size: 32
   max_batch_frames: 24000
   max_attention_tokens: 12000000
   memory_limit: auto

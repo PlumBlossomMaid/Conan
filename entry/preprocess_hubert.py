@@ -221,6 +221,20 @@ def _load_audios(
     return [_load_audio(path, sample_rate) for path in batch_files]
 
 
+def _submit_load(
+    batch_files: list[Path], sample_rate: int, executor: Executor | None
+) -> list | None:
+    """Start audio loads in the background so the GPU never waits on them.
+
+    Returns a list of per-file futures (one per file), or None when no pool
+    is configured (caller falls back to a synchronous load).
+    """
+    if executor is None:
+        return None
+    items = [(path, sample_rate) for path in batch_files]
+    return [executor.submit(_load_audio_worker, item) for item in items]
+
+
 def _prepare_batch(
     audios: list[np.ndarray],
     batch_files: list[Path],
@@ -645,9 +659,22 @@ class HubertPreprocessor:
             try:
                 pbar = tqdm(total=total_work, initial=sum(work_units[:ok]), desc=split_name, unit="work", dynamic_ncols=True)
                 start_time = time.time()
-                for batch_files in batches:
+                prefetched = None
+                for batch_index, batch_files in enumerate(batches):
+                    if prefetched is not None:
+                        # Submitted one full GPU cycle ago; normally already done.
+                        audios = [f.result() for f in prefetched]
+                        prefetched = None
+                    else:
+                        audios = _load_audios(batch_files, sample_rate, loader_pool)
+                    # Eagerly start the next batch's audio load while the GPU
+                    # works on this batch's mel + HuBERT compute.
+                    if batch_index + 1 < len(batches):
+                        prefetched = _submit_load(
+                            batches[batch_index + 1], sample_rate, loader_pool
+                        )
                     _ensure_memory_headroom(self.memory_limit_ratio)
-                    samples = _load_batch(batch_files, self.audio_cfg, stft_layer, mel_basis, loader_pool)
+                    samples = _prepare_batch(audios, batch_files, self.audio_cfg, stft_layer, mel_basis)
                     _ensure_memory_headroom(self.memory_limit_ratio)
                     emb = _run_hubert_batch_resilient(model, samples)
                     for i, sample in enumerate(samples):
@@ -659,7 +686,7 @@ class HubertPreprocessor:
                     if elapsed > 0:
                         completed_work = sum(work_units[:ok])
                         pbar.set_postfix(speed=f"{completed_work / elapsed:.1f} work/s", memory=_memory_status())
-                    del samples, emb
+                    del audios, samples, emb
                     gc.collect()
                 pbar.close()
             finally:
