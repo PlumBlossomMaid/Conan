@@ -15,38 +15,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import yaml
-
+from utils.config_utils import apply_overrides, load_config
 from utils.dotdict import DotDict
-
-
-def load_config(config_path: str) -> dict:
-    path = Path(config_path)
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    with open(path, encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
-
-    parents = config.pop("base_config", None)
-    if not parents:
-        return config
-    if isinstance(parents, str):
-        parents = [parents]
-
-    merged = {}
-    for parent in parents:
-        merged = _deep_update(merged, load_config(parent))
-    return _deep_update(merged, config)
-
-
-def _deep_update(base: dict, override: dict) -> dict:
-    result = dict(base)
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = _deep_update(result[key], value)
-        else:
-            result[key] = value
-    return result
 
 
 def get_preprocess_class(preprocess_cls: str):
@@ -60,9 +30,16 @@ def get_preprocess_class(preprocess_cls: str):
 def main():
     parser = argparse.ArgumentParser(description="Run a Conan preprocessing stage.")
     parser.add_argument("-c", "--config", required=True, help="Path to preprocessing config YAML")
+    parser.add_argument(
+        "-o", "--override", action="append", default=None,
+        metavar="KEY=VALUE",
+        help="Override a config value (repeatable, YAML-typed). "
+             "Example: -o data.wavs_dir=/path/to/wavs -o preprocessing.device=iluvatar_gpu:0",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
+    apply_overrides(config, args.override)
     if "preprocess_cls" not in config:
         raise ValueError(f"{args.config} must define 'preprocess_cls'")
     DotDict(config).print_dict()
