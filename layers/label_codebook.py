@@ -132,18 +132,26 @@ class PaddleLabelCodebook:
         """Nearest-centroid label per row.
 
         Args:
-            features: (T, D) float32 teacher features.
+            features: (T, D) float32 teacher features — batched (B, T, D)
+                      input is flattened to (B*T, D) and reshaped back to
+                      (B, T).
 
         Returns:
-            labels: (T,) int64.
+            labels: (T,) or (B, T) int64.
         """
         features = np.asarray(features, dtype=np.float32)
-        if features.ndim != 2 or features.shape[1] != self.feature_dim:
+        if features.ndim not in (2, 3) or features.shape[-1] != self.feature_dim:
             raise ValueError(
-                f"expected (T, {self.feature_dim}), got {features.shape}"
+                f"expected (T, {self.feature_dim}) or (B, T, {self.feature_dim}), "
+                f"got {features.shape}"
             )
-        logits = features @ self.centroids.T
-        return np.argmax(logits, axis=1).astype(np.int64)
+        batched = features.ndim == 3
+        flat = features.reshape(-1, self.feature_dim)
+        logits = flat @ self.centroids.T
+        flat_labels = np.argmax(logits, axis=1).astype(np.int64)
+        if batched:
+            return flat_labels.reshape(features.shape[0], features.shape[1])
+        return flat_labels
 
     def save(self, path: str | Path) -> None:
         path = Path(path)

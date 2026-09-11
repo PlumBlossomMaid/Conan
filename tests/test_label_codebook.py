@@ -64,6 +64,18 @@ def test_codebook_labels_is_argmax_logits():
     np.testing.assert_array_equal(labels, expected)
 
 
+def test_codebook_labels_accepts_batched_3d():
+    x = _fake_features()
+    cb = build_codebook(x, num_clusters=16, max_iter=30, n_init=1, seed=0)
+    batch = x[:40].reshape(2, 20, 256)
+    labels = cb.labels(batch)
+    assert labels.shape == (2, 20)
+    np.testing.assert_array_equal(
+        labels,
+        np.argmax(x[:40] @ cb.centroids.T, axis=1).reshape(2, 20),
+    )
+
+
 def test_codebook_save_load_roundtrip(tmp_path):
     x = _fake_features(n=2000)
     cb = build_codebook(x, num_clusters=8, max_iter=20)

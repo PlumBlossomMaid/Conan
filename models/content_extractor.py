@@ -88,7 +88,8 @@ class ContentExtractorModel(Model):
             mel: (B, n_mels, T) mel-spectrogram.
 
         Returns:
-            content_emb: (B, T, 256) content embeddings.
+            content_emb: (B, T, output_dim) content embeddings (MSE mode) or
+                         (B, T, num_labels) logits (CE mode).
         """
         return self.extractor(mel.transpose([0, 2, 1]))
 
@@ -239,12 +240,12 @@ class ContentExtractorModel(Model):
             val_metrics = {}
             if self._trainer is not None:
                 logged = self._trainer.callback_metrics
-                for key in ("val/loss", "val/cosine_sim"):
+                for key in ("val/loss", "val/cosine_sim", "val/acc"):
                     if key in logged:
                         val_metrics[key] = logged[key]
                 if not val_metrics and self._trainer._results is not None:
                     m = self._trainer._results.metrics(on_step=False)
-                    for key in ("val/loss", "val/cosine_sim"):
+                    for key in ("val/loss", "val/cosine_sim", "val/acc"):
                         if key in m["callback"]:
                             val_metrics[key] = m["callback"][key]
             if val_metrics:
