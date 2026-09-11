@@ -26,6 +26,29 @@ def test_content_extractor_collater_preserves_valid_lengths(tmp_path):
     assert tuple(batch["hubert_emb"].shape) == (2, 5, 256)
 
 
+def test_content_extractor_reads_sizes_from_attrs(tmp_path):
+    import h5py
+
+    path = tmp_path / "samples.h5"
+    with h5py.File(path, "w") as f:
+        # Has attrs — sizes must come from mel_frames, not the dataset shape.
+        g = f.create_group("00000000")
+        g.create_dataset("mel", data=np.zeros((80, 100), dtype=np.float32))
+        g.create_dataset("hubert", data=np.zeros((100, 256), dtype=np.float32))
+        g.attrs["mel_frames"] = 7
+        # Missing attrs — must fall back to the mel dataset shape.
+        g2 = f.create_group("00000001")
+        g2.create_dataset("mel", data=np.zeros((80, 4), dtype=np.float32))
+        g2.create_dataset("hubert", data=np.zeros((4, 256), dtype=np.float32))
+
+    dataset = ContentExtractorDataset(str(path), max_frames=500)
+
+    assert dataset.sizes == [7, 4]
+    # num_frames is capped at max_frames for the batch sampler budget.
+    assert dataset.num_frames(0) == 7
+    assert ContentExtractorDataset(str(path), max_frames=5).num_frames(0) == 5
+
+
 def test_ssim_loss_accepts_time_mask():
     loss_fn = SSIMMelLoss(window_size=3)
     pred = paddle.zeros([1, 2, 4])
