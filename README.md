@@ -67,13 +67,19 @@ pip install -r requirements.txt
 python entry/preprocess.py -c configs/preprocess_hubert.yaml
 ```
 
+Edit `configs/preprocess_hubert.yaml` for your environment (audio dir, output dir,
+HuBERT checkpoint, device). Conan never hardcodes machine paths in code — configs
+carry the environment-specific values.
+
 ### 2. Training
 
 Conan uses a unified training entry point with configuration files:
 
 ```bash
-# Stage 1: Distill HuBERT into the Stream Content Extractor
-python entry/train.py -c configs/content_extractor.yaml
+# Stage 1: Distill HuBERT into the Stream Content Extractor.
+# Override the machine-local HDF5 path at launch instead of editing the config:
+python entry/train.py -c configs/content_extractor.yaml \
+  -o data.hdf5_path=/path/to/train.h5
 
 # Stage 2: Train the Causal Shuffle Vocoder
 python entry/train.py -c configs/vocoder.yaml
@@ -81,6 +87,9 @@ python entry/train.py -c configs/vocoder.yaml
 # Stage 3: Train the main conversion model with the frozen content extractor
 python entry/train.py -c configs/main.yaml
 ```
+
+`-o key=value` overrides any config value (repeatable, YAML-typed, dotted keys),
+e.g. `-o data.val_max_samples=50 -o training.batch_size=16`.
 
 ### 3. Inference
 
