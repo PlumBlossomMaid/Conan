@@ -7,12 +7,15 @@ base_config: configs/base.yaml
 
 preprocess_cls: entry.preprocess_hubert.HubertPreprocessor
 
-# 数据路径
+# 数据路径 —— 运行前请改为本机实际路径(仓库保持中性占位,不硬编码环境):
+#   - wavs_dir: 预处理好的扁平音频目录(Conan 不下载/解压/展平档案)
+#   - output_dir: HDF5 输出目录
+#   - hubert_checkpoint: HuBERT 对齐 Paddle checkpoint
 data:
-  wavs_dir: /tmp/conan_dataset/LibriTTS_audio
-  output_dir: /tmp/conan_dataset/LibriTTS_hubert
-  hubert_emb_dir: /tmp/conan_dataset/LibriTTS_hubert
-  hubert_checkpoint: /tmp/conan_dataset/AMD_server/hubert4_paddle_aligned_20260818.pdparams
+  wavs_dir: data/libritts/wavs
+  output_dir: data/libritts/hubert_embeddings
+  hubert_emb_dir: data/libritts/hubert_embeddings
+  hubert_checkpoint: ckpts/hubert_teacher/hubert_batch.pdparams
   n_valid: 150
   valid_seed: 1234
 
@@ -22,7 +25,9 @@ preprocessing:
   max_batch_frames: 24000
   max_attention_tokens: 12000000
   memory_limit: auto
-  device: iluvatar_gpu:0
+  # 中性占位:任何设备上都会解析;本机若为国产加速器,运行时覆盖,如
+  #   -o preprocessing.device=iluvatar_gpu:0
+  device: gpu
   hdf5_compression: none
   loader_mode: process
   loader_workers: 4

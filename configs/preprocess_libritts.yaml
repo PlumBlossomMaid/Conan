@@ -7,5 +7,7 @@ base_config: configs/base.yaml
 
 preprocess_cls: entry.preprocess_libritts.LibriTTSPreprocessor
 
+# 指向已由外部数据集工具准备好的扁平音频目录(Conan 不下载/解压/展平档案)。
+# 运行前改为本机实际路径。
 data:
-  audio_dir: /tmp/conan_dataset/LibriTTS_audio
+  audio_dir: data/libritts/wavs

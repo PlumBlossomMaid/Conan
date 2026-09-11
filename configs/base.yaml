@@ -4,7 +4,9 @@
 # ============================================================================
 
 # GPU / 设备
-device: iluvatar_gpu
+# 中性占位:任意设备均可。国产加速器(Iluvatar/Ascend NPU 等)在运行时覆盖,如
+#   -o device=iluvatar_gpu  或  -o device=npu
+device: gpu
 gpu_id: 0
 
 # 数据
