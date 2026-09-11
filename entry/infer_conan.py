@@ -2,9 +2,9 @@
 
 Usage:
     python entry/infer_conan.py \
-        --content-ckpt ckpts/content_extractor/step_80000.ckpt \
-        --main-ckpt ckpts/main_model/step_160000.ckpt \
-        --vocoder-ckpt ckpts/vocoder/step_600000.ckpt \
+        --content-ckpt ckpts/content_extractor/last.pdparams \
+        --main-ckpt ckpts/main_model/last.pdparams \
+        --vocoder-ckpt ckpts/vocoder/last.pdparams \
         --source source.wav \
         --reference ref.wav \
         --output out.wav \

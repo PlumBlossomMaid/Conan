@@ -99,21 +99,25 @@ python entry/infer_conan.py \
   --source source.wav \
   --reference reference.wav \
   --output output.wav \
-  --content-ckpt ckpts/content_extractor/best.pdparams \
-  --main-ckpt ckpts/main_model/best.pdparams \
-  --vocoder-ckpt ckpts/vocoder/best.pdparams \
+  --content-ckpt ckpts/content_extractor/last.pdparams \
+  --main-ckpt ckpts/main_model/last.pdparams \
+  --vocoder-ckpt ckpts/vocoder/last.pdparams \
   --streaming \
   --chunk-ms 80
 ```
+
+Checkpoint files are named `{epoch}-{step}.pdparams` by default, plus a
+`last.pdparams` copy written on every save (Ocean `ModelCheckpoint`).
 
 ## Configuration
 
 All preprocessing and training configuration lives in YAML files under `configs/`. Key parameters:
 
 - `data.wavs_dir`: Flattened waveform directory
-- `data.hubert_onnx`: Batched HuBERT ONNX model path
-- `preprocessing.max_batch_size`: Maximum ONNX batch size for HuBERT extraction
+- `data.output_dir`: HDF5 output directory (mel + HuBERT targets)
+- `preprocessing.max_batch_size`: Maximum batch size for HuBERT extraction
 - `preprocessing.max_batch_frames`: Padded frame budget for HuBERT extraction
+- `preprocessing.device`: Device to run on (`gpu` default; domestic accelerators use e.g. `-o preprocessing.device=iluvatar_gpu:0`)
 - `data.n_valid` / `data.valid_seed`: Random validation sample count and split seed
 - `task_cls`: Model class to instantiate
 - `training.max_batch_frames`: Padded-frame dynamic batching for consistent GPU memory
