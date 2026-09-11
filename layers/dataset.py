@@ -426,11 +426,15 @@ class ContentExtractorDataset(Dataset):
         hdf5_path: str,
         max_frames: int = 500,
         max_samples: Optional[int] = None,
+        label_codebook=None,
     ):
         super().__init__()
         self.max_frames = max_frames
         self.hdf5_path = hdf5_path
         self._h5f = None
+        # Optional codebook for the paper's discrete-label (CE) objective.
+        # When set, ``hubert_label`` is produced instead of ``hubert_emb``.
+        self.label_codebook = label_codebook
 
         # List keys from HDF5. Frame counts are read from the ``mel_frames``
         # attribute written by the preprocessor when present (avoids opening
@@ -487,11 +491,32 @@ class ContentExtractorDataset(Dataset):
 
         valid_mask = np.zeros(self.max_frames, dtype=np.float32)
         valid_mask[:valid_frames] = 1.0
+        if self.label_codebook is not None:
+            # Paper objective: discrete content labels (argmax over the
+            # k-means codebook of HuBERT features).
+            hubert_label = self.label_codebook.labels(hubert_emb[:valid_frames])
+            padded_label = np.zeros(self.max_frames, dtype=np.int64)
+            padded_label[:valid_frames] = hubert_label
+            return {
+                "mel": mel,
+                "hubert_label": padded_label,
+                "valid_mask": valid_mask,
+                "length": valid_frames,
+            }
         return {"mel": mel, "hubert_emb": hubert_emb, "valid_mask": valid_mask, "length": valid_frames}
 
     def collater(self, samples):
         mels = np.stack([s["mel"] for s in samples], axis=0).astype(np.float32)
         M = mels.shape[-1]
+
+        # CE mode: stack int64 labels (already padded to max_frames)
+        if "hubert_label" in samples[0]:
+            return {
+                "source_mel": mels,
+                "hubert_label": np.stack([s["hubert_label"] for s in samples], axis=0).astype(np.int64),
+                "valid_mask": np.stack([s["valid_mask"] for s in samples], axis=0).astype(np.float32),
+                "lengths": np.asarray([s["length"] for s in samples], dtype=np.int64),
+            }
 
         # Always produce hubert_emb, fill missing with zeros
         embs = []

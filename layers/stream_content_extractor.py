@@ -1,32 +1,45 @@
 """Stream Content Extractor (SCE) — Emformer-based streaming content encoder.
 
 This module distills HuBERT content representations into a streaming
-Emformer architecture. During training, it learns to predict continuous
-HuBERT 256-dim embeddings via MSE regression (matching SVC's proven approach).
+Emformer architecture.
+
+During training, the module can operate in two modes:
+1. MSE regression (default): distill continuous 256-dim embeddings.
+   This matches the approach verified in SVC4 and is the current default.
+
+2. Cross-entropy classification (paper objective): distill discrete
+   content labels. Requires an offline-constructed label codebook via
+   `entry/build_label_codebook.py` that clusters HuBERT features offline.
 
 At inference time, it processes audio chunk by chunk with a memory
-bank for context continuity, producing 256-dim content embeddings at 50Hz.
+bank for context continuity, producing 256-dim content embeddings at
+50Hz (MSE mode) or discrete labels (CE mode).
 """
 
 from typing import Optional, Tuple
 
+import numpy as np
 import paddle
 import paddle.nn as nn
 import paddle.nn.functional as F
 
 from layers.emformer import EmformerEncoder
+from layers.label_codebook import PaddleLabelCodebook
 
 
 class StreamContentExtractor(nn.Layer):
     """Streaming content encoder based on Emformer.
 
-    Produces continuous 256-dim content embeddings at 20ms intervals from
-    streaming audio, matching HuBERT's frame rate (50 Hz).
+    Produces 256-dim content embeddings (MSE mode) or discrete content
+    labels (CE mode) at 20ms intervals from streaming audio, matching
+    HuBERT's frame rate (50 Hz).
 
-    The module wraps an Emformer encoder and an output projection
-    that produces 256-dim content embeddings (MSE regression target).
-    No clustering is required — the model directly regresses to HuBERT's
-    continuous embeddings, matching the approach verified in SVC4.
+    MSE mode: wraps an Emformer encoder and an output projection that
+    produces 256-dim content embeddings (MSE regression target).
+
+    CE mode: wraps the same Emformer encoder, projects to ``num_labels``
+    logits and applies softmax; the training target is the argmax label
+    from a k-means codebook over HuBERT features (paper objective).
 
     Args:
         input_dim: Input feature dimension (e.g., 80 mel bins).
@@ -39,6 +52,9 @@ class StreamContentExtractor(nn.Layer):
         right_context: Number of right context chunks (0 for causal).
         dim_feedforward: FFN dimension.
         dropout: Dropout rate.
+        num_labels: Number of discrete content labels (CE mode). When > 0,
+                    the head is a linear to ``num_labels`` logits.
+        label_codebook: Optional pre-built PaddleLabelCodebook for CE mode.
     """
 
     def __init__(
@@ -53,11 +69,15 @@ class StreamContentExtractor(nn.Layer):
         right_context: int = 2,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
+        num_labels: int = 0,
+        label_codebook: Optional[PaddleLabelCodebook] = None,
     ):
         super().__init__()
         self.chunk_size = chunk_size
         self.right_context = right_context
         self.output_dim = output_dim
+        self.num_labels = num_labels
+        self.label_codebook = label_codebook
 
         # Input mel projection
         self.mel_proj = nn.Sequential(
@@ -81,6 +101,18 @@ class StreamContentExtractor(nn.Layer):
         # Content embedding head (regression to 256-dim HuBERT embedding)
         self.content_head = nn.Linear(d_model, output_dim)
 
+        # Classification head (paper objective): d_model → num_labels logits
+        if num_labels > 0:
+            self.classifier = nn.Linear(d_model, num_labels)
+        else:
+            self.classifier = None
+
+    def _head(self, x: paddle.Tensor) -> paddle.Tensor:
+        """Return the mode-appropriate projection of the encoder output."""
+        if self.classifier is not None:
+            return self.classifier(x)  # (B, T, num_labels) logits
+        return self.content_head(x)  # (B, T, output_dim) embeddings
+
     def forward(
         self,
         mel: paddle.Tensor,
@@ -91,7 +123,8 @@ class StreamContentExtractor(nn.Layer):
             mel: (B, T_mel, n_mels) mel-spectrogram frames.
 
         Returns:
-            content_emb: (B, T_enc, output_dim) 256-dim content embeddings.
+            content_emb: (B, T_enc, output_dim) 256-dim content embeddings
+                         (MSE mode) or (B, T_enc, num_labels) logits (CE mode).
         """
         # Project mel to model dimension
         x = self.mel_proj(mel)  # (B, T, d_model)
@@ -99,10 +132,8 @@ class StreamContentExtractor(nn.Layer):
         # Emformer encoding
         x = self.emformer(x)  # (B, T, d_model)
 
-        # Content embedding head (MSE regression to HuBERT 256-dim)
-        content_emb = self.content_head(x)  # (B, T, output_dim)
-
-        return content_emb
+        # Mode-appropriate head
+        return self._head(x)
 
     def forward_chunk(
         self,
@@ -130,5 +161,4 @@ class StreamContentExtractor(nn.Layer):
         x, new_memory, new_summary = self.emformer.forward_chunk(
             x, left_context, right_context, memory, summary
         )
-        content_emb = self.content_head(x)
-        return content_emb, new_memory, new_summary
+        return self._head(x), new_memory, new_summary
