@@ -25,7 +25,6 @@ import librosa
 import numpy as np
 import paddle
 import soundfile as sf
-import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -37,11 +36,7 @@ from layers.adaptive_style_encoder import AdaptiveStyleEncoder
 from layers.causal_pitch_predictor import CausalPitchPredictor
 from layers.causal_mel_decoder import CausalMelDecoder
 from layers.causal_shuffle_vocoder import CausalShuffleVocoder
-
-
-def load_config(path: str) -> dict:
-    with open(path, encoding='utf-8') as f:
-        return yaml.safe_load(f)
+from utils.config_utils import load_config
 
 
 def load_checkpoint(model: paddle.nn.Layer, path: str, prefix: str = ""):
