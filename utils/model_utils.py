@@ -145,7 +145,7 @@ def load_pretrained_with_frozen(
         # Load pretrained content extractor and freeze it
         load_pretrained_with_frozen(
             model.content_extractor,
-            'ckpts/content_extractor/best.pdparams',
+            'ckpts/content_extractor/last.pdparams',
             frozen_params=['emformer', 'mel_proj']
         )
     """

@@ -64,7 +64,10 @@ training:
 data:
   data_dir: data/libritts
   hubert_emb_dir: data/libritts/hubert_embeddings
-  ckpt_content_extractor: ckpts/content_extractor/step_80000.ckpt
+  # Stage 1 checkpoint to load as the frozen content extractor.
+  # Ocean saves {epoch}-{step}.pdparams + last.pdparams; update this path
+  # after Stage 1 training (machine-local or repo-relative).
+  ckpt_content_extractor: ckpts/content_extractor/last.pdparams
 
 logger: tensorboard
 log_dir: logs/main_model

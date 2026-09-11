@@ -129,7 +129,7 @@ task_cls: models.conan_main.ConanMainModel
 work_dir: ckpts/main_model
 
 pretrained:
-  content_extractor: ckpts/content_extractor/best.pdparams
+  content_extractor: ckpts/content_extractor/last.pdparams
   frozen_params:
     - content_extractor  # Freeze during fine-tuning
 ```
