@@ -38,7 +38,7 @@ training:
   num_workers: 0
   accelerator: gpu
   devices: 1
-  precision: 16-mixed
+  precision: 32-true        # fp16 AMP measured *slower* on Iluvatar (cast overhead)
   clip_grad: 1.0
   log_every: 500
   val_check_interval: 1000
@@ -59,6 +59,13 @@ data:
   # Prefer the held-out split the preprocessor writes:
   #   -o data.val_hdf5_path=/absolute/path/to/valid.h5
   val_max_samples: 50
+  # Paper objective (discrete content labels): run entry/build_label_codebook.py
+  # first, then enable with:
+  #   -o content_extractor.loss_type=ce \
+  #   -o content_extractor.num_labels=256 \
+  #   -o data.label_codebook=/absolute/path/to/codebook.npy
+  # Default loss_type=mse keeps the continuous-embedding regression.
+  label_codebook:
 
 logger: visualdl
 log_dir: logs/content_extractor
