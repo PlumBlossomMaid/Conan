@@ -113,8 +113,9 @@ def test_dataset_ce_mode_returns_labels(tmp_path):
     assert item["hubert_label"].dtype == np.int64
     assert item["valid_mask"][:30].sum() == 30 and item["valid_mask"][30:].sum() == 0
     assert item["hubert_label"][:30].min() >= 0 and item["hubert_label"][:30].max() < 8
-    # Padded region must be zero — which could collide with a real label 0,
-    # but invalid frames are masked by valid_mask during loss computation.
+    # Padded region must carry a neutral label outside the codebook range so
+    # masked-out frames can never collide with a real label 0.
+    assert (item["hubert_label"][30:] == 256).all()
     batch = ds.collater([item])
     assert batch["hubert_label"].shape == (1, 50)
     assert batch["hubert_label"].dtype == np.int64

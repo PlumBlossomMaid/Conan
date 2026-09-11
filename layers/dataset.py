@@ -497,6 +497,9 @@ class ContentExtractorDataset(Dataset):
             hubert_label = self.label_codebook.labels(hubert_emb[:valid_frames])
             padded_label = np.zeros(self.max_frames, dtype=np.int64)
             padded_label[:valid_frames] = hubert_label
+            # Neutral-label padding: 256 is out of range for any J<=256
+            # codebook, and CE cross_entropy ignores it via valid_mask.
+            padded_label[valid_frames:] = 256
             return {
                 "mel": mel,
                 "hubert_label": padded_label,
