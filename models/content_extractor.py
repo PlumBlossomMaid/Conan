@@ -117,13 +117,11 @@ class ContentExtractorModel(Model):
             elif T_pred < T_target:
                 logits = F.pad(logits, [0, 0, 0, T_target - T_pred])
             valid_mask = batch["valid_mask"]
+            valid_flat = valid_mask.reshape([-1]) > 0
             loss = F.cross_entropy(
-                logits.reshape([-1, logits.shape[-1]]),
-                hubert_label.reshape([-1]),
-                reduction="none",
-            )
-            loss = (loss * valid_mask.reshape([-1])).sum() / paddle.clip(
-                valid_mask.sum(), min=1.0
+                logits.reshape([-1, logits.shape[-1]])[valid_flat],
+                hubert_label.reshape([-1])[valid_flat],
+                reduction="mean",
             )
             acc = (
                 (paddle.argmax(logits, axis=-1) == hubert_label)
@@ -190,13 +188,11 @@ class ContentExtractorModel(Model):
             elif T_pred < T_target:
                 logits = F.pad(logits, [0, 0, 0, T_target - T_pred])
             valid_mask = batch["valid_mask"]
+            valid_flat = valid_mask.reshape([-1]) > 0
             loss = F.cross_entropy(
-                logits.reshape([-1, logits.shape[-1]]),
-                hubert_label.reshape([-1]),
-                reduction="none",
-            )
-            loss = (loss * valid_mask.reshape([-1])).sum() / paddle.clip(
-                valid_mask.sum(), min=1.0
+                logits.reshape([-1, logits.shape[-1]])[valid_flat],
+                hubert_label.reshape([-1])[valid_flat],
+                reduction="mean",
             )
             acc = (
                 (paddle.argmax(logits, axis=-1) == hubert_label)
