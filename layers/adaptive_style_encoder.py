@@ -10,7 +10,7 @@ The style embedding is aligned with content + timbre via Scaled Dot-Product
 Attention, where z_ct = [z_c, z_t] serves as query and style as key/value.
 """
 
-from typing import Optional
+from typing import Optional, Tuple
 
 import paddle
 import paddle.nn as nn
@@ -59,6 +59,7 @@ class AdaptiveStyleEncoder(nn.Layer):
         self.chunk_size = chunk_size
         self.content_dim = content_dim
         self.timbre_dim = timbre_dim
+        self._last_cvq_stats: Optional[dict] = None
 
         # Conv blocks: mel → features
         convs = []
@@ -105,7 +106,7 @@ class AdaptiveStyleEncoder(nn.Layer):
         ref_mel: paddle.Tensor,
         z_c: paddle.Tensor,
         z_t: paddle.Tensor,
-    ) -> paddle.Tensor:
+    ) -> Tuple[paddle.Tensor, dict]:
         """Extract style embedding aligned with content + timbre.
 
         Args:
@@ -115,6 +116,8 @@ class AdaptiveStyleEncoder(nn.Layer):
 
         Returns:
             z_s: (B, T_c, style_dim) style embedding, aligned per content chunk.
+            stats: Dict of CVQ stats (``vq_loss``, ``codes``, ``perplexity``,
+                   ``usage``, ``contrastive_loss``) for the training loop.
         """
         B = ref_mel.shape[0]
 
@@ -133,7 +136,7 @@ class AdaptiveStyleEncoder(nn.Layer):
         x = x.transpose([0, 2, 1])  # (B, T_chunks, C)
         x = self.proj(x)  # (B, T_chunks, code_dim)
 
-        # Clustering VQ
+        # Clustering VQ (returns quantized features + loss stats)
         z_s_chunks, stats = self.cvq(x.transpose([0, 2, 1]))  # (B, code_dim, T_chunks)
         z_s_chunks = z_s_chunks.transpose([0, 2, 1])  # (B, T_chunks, style_dim)
 
@@ -155,15 +158,26 @@ class AdaptiveStyleEncoder(nn.Layer):
         z_s = paddle.matmul(attn, V)  # (B, T_c, style_dim)
         z_s = self.align_out(z_s)
 
-        return z_s
+        self._last_cvq_stats = stats
+        return z_s, stats
+
+    def extract_style(
+        self,
+        ref_mel: paddle.Tensor,
+        z_c: paddle.Tensor,
+        z_t: paddle.Tensor,
+    ) -> paddle.Tensor:
+        """Inference helper: return only the aligned style embedding.
+
+        Equivalent to ``self(ref_mel, z_c, z_t)[0]``. Keeps callers that do
+        not need the CVQ loss stats (inference, benchmarking, ONNX export)
+        working with the previous single-tensor return value.
+        """
+        return self.forward(ref_mel, z_c, z_t)[0]
 
     def get_cvq_losses(self) -> dict:
-        """Return accumulated CVQ losses from the last forward pass.
-
-        Note: CVQ stats are returned from the forward pass. This method
-        is a convenience for the training loop.
-        """
-        return {"vq_loss": paddle.to_tensor(0.0)}
+        """Return accumulated CVQ losses from the last forward pass."""
+        return self._last_cvq_stats if self._last_cvq_stats is not None else {"vq_loss": paddle.to_tensor(0.0)}
 
 
 class PositionalEncoding(nn.Layer):

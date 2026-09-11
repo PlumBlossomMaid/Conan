@@ -137,6 +137,7 @@ class ConanMainModel(Model):
             timbre_dim=timbre_dim,
             content_dim=content_dim,
         )
+        self._last_cvq_stats: Optional[dict] = None
 
         # ── Causal Pitch Predictor ──
         self.pitch_predictor = CausalPitchPredictor(
@@ -226,8 +227,8 @@ class ConanMainModel(Model):
         # Timbre embedding
         z_t = self.timbre_encoder(ref_mel)  # (B, timbre_dim)
 
-        # Style embedding
-        z_s = self.style_encoder(ref_mel, z_c, z_t)  # (B, T, style_dim)
+        # Style embedding (CVQ stats carried through for the VQ loss)
+        z_s, cvq_stats = self.style_encoder(ref_mel, z_c, z_t)  # (B, T, style_dim)
 
         # F0 prediction
         f0_pred = self.pitch_predictor(z_c)  # (B, T, 1)
@@ -241,12 +242,14 @@ class ConanMainModel(Model):
             "z_t": z_t,
             "z_s": z_s,
             "z_c": z_c,
+            "vq_loss": cvq_stats.get("vq_loss", paddle.to_tensor(0.0)),
         }
 
     def _generator_loss(
         self, mel_pred: paddle.Tensor, mel_gt: paddle.Tensor,
         f0_pred: paddle.Tensor, f0_gt: paddle.Tensor,
         valid_mask: Optional[paddle.Tensor] = None,
+        vq_loss: Optional[paddle.Tensor] = None,
     ) -> dict:
         """Compute generator losses.
 
@@ -256,6 +259,7 @@ class ConanMainModel(Model):
             L_adv: LSGAN generator loss
             L_fm: feature matching loss
             L_pitch: MSE between predicted and GT F0
+            L_vq: CVQ codebook loss + commitment + contrastive (Adaptive Style Encoder)
         """
         B = mel_pred.shape[0]
 
@@ -308,7 +312,13 @@ class ConanMainModel(Model):
         else:
             loss_pitch = paddle.to_tensor(0.0)
 
-        loss_g = loss_mae + loss_ssim + loss_adv + loss_fm + loss_pitch
+        # CVQ codebook loss (Adaptive Style Encoder): vq + commitment + contrastive
+        if vq_loss is not None:
+            loss_vq = vq_loss * self.lambda_vq
+        else:
+            loss_vq = paddle.to_tensor(0.0)
+
+        loss_g = loss_mae + loss_ssim + loss_adv + loss_fm + loss_pitch + loss_vq
 
         return {
             "loss_g": loss_g,
@@ -317,6 +327,7 @@ class ConanMainModel(Model):
             "loss_adv": loss_adv,
             "loss_fm": loss_fm,
             "loss_pitch": loss_pitch,
+            "loss_vq": loss_vq,
         }
 
     def _discriminator_loss(self, mel_pred: paddle.Tensor, mel_gt: paddle.Tensor) -> paddle.Tensor:
@@ -363,7 +374,9 @@ class ConanMainModel(Model):
 
         # ── Generator backward (accumulate grad) ──
         valid_mask = batch.get("source_valid_mask")
-        g_losses = self._generator_loss(mel_pred, mel_gt, out["f0_pred"], f0_gt, valid_mask)
+        g_losses = self._generator_loss(
+            mel_pred, mel_gt, out["f0_pred"], f0_gt, valid_mask, out.get("vq_loss")
+        )
         g_losses["loss_g"].backward()
 
         # ── Discriminator backward (accumulate grad) ──
@@ -386,6 +399,7 @@ class ConanMainModel(Model):
             "loss/g_adv": g_losses["loss_adv"].item(),
             "loss/g_fm": g_losses["loss_fm"].item(),
             "loss/g_pitch": g_losses["loss_pitch"].item(),
+            "loss/g_vq": g_losses["loss_vq"].item(),
             "loss/d_total": loss_d.item(),
         })
         self.log("loss/g_total", g_losses["loss_g"].item(), prog_bar=True)
@@ -405,7 +419,8 @@ class ConanMainModel(Model):
             mel_gt = source_mel
 
             g_losses = self._generator_loss(
-                mel_pred, mel_gt, out["f0_pred"], f0_gt, batch.get("source_valid_mask")
+                mel_pred, mel_gt, out["f0_pred"], f0_gt,
+                batch.get("source_valid_mask"), out.get("vq_loss"),
             )
             loss_d = self._discriminator_loss(mel_pred, mel_gt)
 

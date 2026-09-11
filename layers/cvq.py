@@ -140,54 +140,20 @@ class ClusteringVQ(nn.Layer):
         return z_q, stats
 
     def _compute_contrastive_loss(self, z: paddle.Tensor, codes: paddle.Tensor) -> paddle.Tensor:
-        """Contrastive loss: pull code closer to its assigned features, push
-        away from non-assigned features.
+        """Contrastive loss: pull each feature toward its assigned code, push it
+        away from the other codebook entries.
+
+        Implemented as a softmax CE over ``z @ codebook.T`` with the assigned
+        code index as the positive class — the vectorized form of the
+        InfoNCE term in the paper (``-log exp(sim(e,z+)) / sum_i exp(sim(e,z_i-))``)
+        with all code vectors as the candidate set.
 
         Args:
             z: (N, code_dim) input features.
-            codes: (N,) code indices.
+            codes: (N,) assigned code indices.
 
         Returns:
             Scalar contrastive loss.
         """
-        # Get the assigned code vectors
-        code_vectors = self.codebook  # (num_codes, code_dim)
-
-        # For each code in the batch, find positive pairs (same code) vs negative
-        loss = 0.0
-        n_unique = 0
-        for code_idx in range(self.num_codes):
-            mask = (codes == code_idx)
-            n_pos = mask.sum()
-            if n_pos < 2:
-                continue
-            n_unique += 1
-            pos_features = z[mask]  # (n_pos, code_dim)
-            code_vec = code_vectors[code_idx:code_idx + 1]  # (1, code_dim)
-
-            # Positive: similarity between code and its assigned features
-            sim_pos = paddle.matmul(pos_features, code_vec.t()).squeeze(-1)  # (n_pos,)
-
-            # Negative: similarity between code and OTHER features
-            neg_mask = ~mask
-            neg_features = z[neg_mask]  # (n_neg, code_dim)
-            if neg_features.shape[0] == 0:
-                continue
-            # Sample negatives to keep computation manageable
-            if neg_features.shape[0] > 128:
-                idx = paddle.randperm(neg_features.shape[0])[:128]
-                neg_features = neg_features[idx]
-            sim_neg = paddle.matmul(neg_features, code_vec.t()).squeeze(-1)  # (n_neg,)
-
-            # InfoNCE: -log(exp(sim_pos) / sum(exp(sim_all)))
-            logits = paddle.concat([sim_pos, sim_neg])  # (n_pos + n_neg,)
-            labels = paddle.zeros([sim_pos.shape[0]], dtype=paddle.int64)
-            loss = loss + F.cross_entropy(
-                logits.unsqueeze(0).tile([sim_pos.shape[0], 1]),
-                labels.unsqueeze(0).tile([sim_pos.shape[0]]),
-            )
-
-        if n_unique == 0:
-            return paddle.to_tensor(0.0)
-
-        return loss / n_unique
+        logits = paddle.matmul(z, self.codebook.t())  # (N, num_codes)
+        return F.cross_entropy(logits, codes)

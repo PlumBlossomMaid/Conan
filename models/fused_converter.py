@@ -74,7 +74,7 @@ class ReferenceEncoder(nn.Layer):
         B = ref_mel.shape[0]
         T_c = ref_mel.shape[-1] // 4  # approximate chunk count
         dummy_z_c = paddle.zeros([B, max(1, T_c), self.style_encoder.content_dim])
-        z_s = self.style_encoder(ref_mel, dummy_z_c, z_t)
+        z_s = self.style_encoder.extract_style(ref_mel, dummy_z_c, z_t)
         return z_t, z_s
 
 

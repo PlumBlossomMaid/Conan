@@ -130,7 +130,7 @@ def main():
             zt = paddle.randn([1, td])
             rtf_benchmark(
                 f"Style Encoder{' [CINN]' if cinn else ''}",
-                lambda m=m, a=ref, b=zc, c=zt: m(a, b, c), audio_len_s,
+                lambda m=m, a=ref, b=zc, c=zt: m.extract_style(a, b, c), audio_len_s,
             )
 
         # ── 4. Causal Pitch Predictor ──

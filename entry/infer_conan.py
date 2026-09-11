@@ -176,7 +176,7 @@ class ConanInference:
         z_t = self.timbre_encoder(ref_mel_t)  # (1, timbre_dim)
 
         # Style
-        z_s = self.style_encoder(ref_mel_t, z_c, z_t)  # (1, T, style_dim)
+        z_s = self.style_encoder.extract_style(ref_mel_t, z_c, z_t)  # (1, T, style_dim)
 
         # Pitch
         f0 = self.pitch_predictor(z_c)  # (1, T, 1)
