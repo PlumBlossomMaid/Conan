@@ -174,11 +174,18 @@ class ContentExtractorModel(Model):
         return build_train_dataloader(dataset, self.config)
 
     def val_dataloader(self):
-        """Validation dataloader — fixed sample count, batch size 1."""
+        """Validation dataloader — fixed sample count, batch size 1.
+
+        Uses ``data.val_hdf5_path`` when set (held-out HDF5 produced by the
+        preprocessor), otherwise falls back to the training file.
+        """
         data_cfg = self.config.get("data", {})
         audio_cfg = self.config.get("audio", {})
         dataset = ContentExtractorDataset(
-            hdf5_path=data_cfg.get("hdf5_path", "data/libritts/hubert_embeddings/train.h5"),
+            hdf5_path=data_cfg.get(
+                "val_hdf5_path",
+                data_cfg.get("hdf5_path", "data/libritts/hubert_embeddings/train.h5"),
+            ),
             max_frames=audio_cfg.get("max_frames", 500),
             max_samples=data_cfg.get("val_max_samples", 50),
         )

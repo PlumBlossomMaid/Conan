@@ -55,6 +55,9 @@ data:
   #   python entry/train.py -c configs/content_extractor.yaml \
   #     -o data.hdf5_path=/absolute/path/to/train.h5
   hdf5_path: data/libritts/hubert_embeddings/train.h5
+  # Validation reads this file when set, otherwise it reads hdf5_path.
+  # Prefer the held-out split the preprocessor writes:
+  #   -o data.val_hdf5_path=/absolute/path/to/valid.h5
   val_max_samples: 50
 
 logger: visualdl

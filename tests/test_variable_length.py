@@ -49,6 +49,34 @@ def test_content_extractor_reads_sizes_from_attrs(tmp_path):
     assert ContentExtractorDataset(str(path), max_frames=5).num_frames(0) == 5
 
 
+def test_content_extractor_val_split_uses_val_hdf5_path(tmp_path):
+    import h5py
+
+    from models.content_extractor import ContentExtractorModel
+
+    def write(path, frames):
+        with h5py.File(path, "w") as f:
+            g = f.create_group("00000000")
+            g.create_dataset("mel", data=np.zeros((80, frames), dtype=np.float32))
+            g.create_dataset("hubert", data=np.zeros((frames, 256), dtype=np.float32))
+            g.attrs["mel_frames"] = frames
+
+    train_path = tmp_path / "train.h5"
+    val_path = tmp_path / "valid.h5"
+    write(str(train_path), 30)
+    write(str(val_path), 12)
+
+    # val_hdf5_path set -> validation reads the held-out file
+    cfg = {"data": {"hdf5_path": str(train_path), "val_hdf5_path": str(val_path), "val_max_samples": 5}, "audio": {"max_frames": 500}}
+    model = ContentExtractorModel(cfg)
+    assert model.val_dataloader().dataset.hdf5_path == str(val_path)
+
+    # unset -> validation falls back to the training file
+    cfg2 = {"data": {"hdf5_path": str(train_path), "val_max_samples": 5}, "audio": {"max_frames": 500}}
+    model2 = ContentExtractorModel(cfg2)
+    assert model2.val_dataloader().dataset.hdf5_path == str(train_path)
+
+
 def test_ssim_loss_accepts_time_mask():
     loss_fn = SSIMMelLoss(window_size=3)
     pred = paddle.zeros([1, 2, 4])
