@@ -50,6 +50,10 @@ training:
 
 data:
   data_dir: data/libritts
+  # Point at the HDF5 produced by entry/preprocess_hubert.py. Keep this
+  # repo-relative placeholder public; pass the machine-local path at launch:
+  #   python entry/train.py -c configs/content_extractor.yaml \
+  #     -o data.hdf5_path=/absolute/path/to/train.h5
   hdf5_path: data/libritts/hubert_embeddings/train.h5
   val_max_samples: 50
 

@@ -27,10 +27,7 @@ from callbacks.file_metrics import FileMetricsCallback
 from callbacks.speed_monitor import SpeedMonitor
 from callbacks.progress_bar import ConanProgressBar
 from utils.dotdict import DotDict
-from utils.logger import get_logger
 from utils.model_utils import freeze_params, print_model_summary
-
-log = get_logger(__name__)
 
 
 def load_config(config_path: str) -> dict:
@@ -71,6 +68,34 @@ def _deep_update(base: dict, override: dict) -> dict:
     return result
 
 
+def apply_overrides(config: dict, overrides) -> dict:
+    """Apply ``-o a.b.c=value`` CLI overrides onto a config.
+
+    Values are YAML-parsed so numbers and booleans keep their types.
+    Nested keys create intermediate dicts on demand.
+
+    Args:
+        config: Config dict to mutate in place.
+        overrides: Iterable of ``key=value`` strings, or None.
+
+    Returns:
+        The same config dict, updated.
+    """
+    for override in overrides or []:
+        if "=" not in override:
+            raise ValueError(
+                f"-o expects 'key=value', got: {override!r} "
+                "(e.g. -o data.hdf5_path=/path/to/train.h5)"
+            )
+        key, _, raw = override.partition("=")
+        value = yaml.safe_load(raw)
+        target = config
+        for part in key.split(".")[:-1]:
+            target = target.setdefault(part, {})
+        target[key.split(".")[-1]] = value
+    return config
+
+
 def get_task_class(task_cls: str):
     """Resolve a ``task_cls`` string such as ``models.vocoder.VocoderModel``.
 
@@ -98,9 +123,16 @@ def build_logger(config: dict, log_dir: Path):
 def main():
     parser = argparse.ArgumentParser(description="Train a Conan stage.")
     parser.add_argument("-c", "--config", required=True, help="Path to the stage config YAML")
+    parser.add_argument(
+        "-o", "--override", action="append", default=None,
+        metavar="KEY=VALUE",
+        help="Override a config value (repeatable, YAML-typed). "
+             "Example: -o data.hdf5_path=/tmp/train.h5 -o training.batch_size=16",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
+    apply_overrides(config, args.override)
     if "task_cls" not in config:
         raise ValueError(f"{args.config} must define 'task_cls'")
     DotDict(config).print_dict()
@@ -116,13 +148,13 @@ def main():
         yaml.safe_dump(config, f, allow_unicode=True, sort_keys=False)
 
     task_cls = get_task_class(config["task_cls"])
-    log.info(f"Task: {config['task_cls']}")
+    print(f"Task: {config['task_cls']}")
     model = task_cls(config)
 
     frozen = config.get("pretrained", {}).get("frozen_params", [])
     if frozen:
         num_frozen = freeze_params(model, frozen)
-        log.info(f"Froze {num_frozen} parameter tensors matching {frozen}")
+        print(f"Froze {num_frozen} parameter tensors matching {frozen}")
     print_model_summary(model)
 
     train_loader = model.train_dataloader()
@@ -148,7 +180,7 @@ def main():
     last_ckpt = ckpt_dir / "last.pdparams"
     ckpt_path = str(last_ckpt) if last_ckpt.exists() else None
     if ckpt_path:
-        log.info(f"Resuming from {ckpt_path}")
+        print(f"Resuming from {ckpt_path}")
 
     trainer = ocean.Trainer(
         max_steps=train_cfg.get("steps", train_cfg.get("max_steps", -1)),
@@ -173,7 +205,9 @@ def main():
             ckpt_path=ckpt_path,
         )
     except Exception:
-        log.exception("Training crashed")
+        import traceback
+
+        traceback.print_exc()
         raise
 
 
