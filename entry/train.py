@@ -47,10 +47,18 @@ def get_task_class(task_cls: str):
 
 
 def build_logger(config: dict, log_dir: Path):
-    """Create the experiment logger named by ``logger`` in the config."""
+    """Create the experiment logger named by ``logger`` in the config.
+
+    ``log_version`` pins the VisualDL ``version_N`` directory so a run that
+    restarts from a checkpoint keeps writing into the same directory and the
+    VDL curves stay continuous instead of splitting into a new version.
+    """
     name = str(config.get("logger", "tensorboard")).lower()
     if name == "visualdl":
-        return ocean.loggers.VisualDLLogger(str(log_dir))
+        version = config.get("log_version")
+        return ocean.loggers.VisualDLLogger(
+            str(log_dir), version=int(version) if version is not None else None
+        )
     return ocean.loggers.TensorBoardLogger(str(log_dir))
 
 
