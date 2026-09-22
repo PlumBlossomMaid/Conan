@@ -286,7 +286,8 @@ class EmformerEncoder(nn.Layer):
             else:
                 right_ctx = paddle.zeros([B, 0, D], dtype=x.dtype)
 
-            # Summary: mean of current chunk
+            # Summary: mean of current chunk. It only enters the attention
+            # queries, so it cannot change this chunk's output (see forward_chunk).
             summary = cur_chunk.mean(axis=1, keepdim=True)  # (B, 1, D)
 
             # Process through each Emformer layer
@@ -322,17 +323,21 @@ class EmformerEncoder(nn.Layer):
             left_context: (B, T_left, D) accumulated left context.
             right_context: (B, T_right, D) right context frames.
             memory: (B, chunk_size, D) memory from previous chunk.
-            summary: (B, 1, D) summary from previous chunk.
+            summary: (B, 1, D) summary from previous chunk. Inert for the returned
+                chunk: a summary only ever enters the attention queries, and query
+                rows do not attend to each other, so it can influence
+                ``new_summary`` but never ``chunk_out``. Callers may pass zeros.
 
         Returns:
             chunk_out: (B, chunk_size, D) processed chunk.
             new_memory: (B, chunk_size, D) memory for next chunk.
             new_summary: (B, 1, D) summary for next chunk.
         """
+        # Every layer reads the *same* memory bank — the previous chunk's output,
+        # as in ``forward``. Handing layer k the output of layer k-1 instead
+        # silently evaluates a different function from the one the weights were
+        # trained for; ``tests/test_streaming_equivalence.py`` pins this.
         for layer in self.layers:
-            chunk, summary = layer(
-                chunk, left_context, right_context, memory, summary
-            )
-            memory = chunk
+            chunk, summary = layer(chunk, left_context, right_context, memory, summary)
 
-        return self.output_proj(chunk), memory, summary
+        return self.output_proj(chunk), chunk, summary
